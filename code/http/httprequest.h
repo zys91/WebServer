@@ -2,7 +2,7 @@
  * @Author       : mark
  * @Date         : 2020-06-25
  * @copyleft Apache 2.0
- */ 
+ */
 #ifndef HTTP_REQUEST_H
 #define HTTP_REQUEST_H
 
@@ -10,24 +10,27 @@
 #include <unordered_set>
 #include <string>
 #include <regex>
-#include <errno.h>     
-#include <mysql/mysql.h>  //mysql
+#include <errno.h>
+#include <mysql/mysql.h> //mysql
 
-#include "../buffer/buffer.h"
-#include "../log/log.h"
-#include "../pool/sqlconnpool.h"
-#include "../pool/sqlconnRAII.h"
+#include "buffer/buffer.h"
+#include "log/log.h"
+#include "pool/sqlconnpool.h"
+#include "pool/sqlconnRAII.h"
 
-class HttpRequest {
+class HttpRequest
+{
 public:
-    enum PARSE_STATE {
+    enum PARSE_STATE
+    {
         REQUEST_LINE,
         HEADERS,
         BODY,
-        FINISH,        
+        FINISH,
     };
 
-    enum HTTP_CODE {
+    enum HTTP_CODE
+    {
         NO_REQUEST = 0,
         GET_REQUEST,
         BAD_REQUEST,
@@ -37,38 +40,39 @@ public:
         INTERNAL_ERROR,
         CLOSED_CONNECTION,
     };
-    
+
     HttpRequest() { Init(); }
     ~HttpRequest() = default;
 
     void Init();
-    bool parse(Buffer& buff);
+    HTTP_CODE parse(Buffer &buff);
+    PARSE_STATE State() const;
 
     std::string path() const;
-    std::string& path();
+    std::string &path();
     std::string method() const;
     std::string version() const;
-    std::string GetPost(const std::string& key) const;
-    std::string GetPost(const char* key) const;
+    std::string GetPost(const std::string &key) const;
+    std::string GetPost(const char *key) const;
 
     bool IsKeepAlive() const;
 
-    /* 
-    todo 
+    /*
+    todo
     void HttpConn::ParseFormData() {}
     void HttpConn::ParseJson() {}
     */
 
 private:
-    bool ParseRequestLine_(const std::string& line);
-    void ParseHeader_(const std::string& line);
-    void ParseBody_(const std::string& line);
+    bool ParseRequestLine_(const std::string &line);
+    void ParseHeader_(const std::string &line);
+    bool ParseBody_(const std::string &line);
 
     void ParsePath_();
-    void ParsePost_();
+    bool ParsePost_();
     void ParseFromUrlencoded_();
 
-    static bool UserVerify(const std::string& name, const std::string& pwd, bool isLogin);
+    static bool UserVerify(const std::string &name, const std::string &pwd, bool isLogin);
 
     PARSE_STATE state_;
     std::string method_, path_, version_, body_;
@@ -80,5 +84,4 @@ private:
     static int ConverHex(char ch);
 };
 
-
-#endif //HTTP_REQUEST_H
+#endif // HTTP_REQUEST_H

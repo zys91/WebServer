@@ -16,12 +16,12 @@
 #include <arpa/inet.h>
 
 #include "epoller.h"
-#include "../log/log.h"
-#include "../timer/heaptimer.h"
-#include "../pool/sqlconnpool.h"
-#include "../pool/threadpool.h"
-#include "../pool/sqlconnRAII.h"
-#include "../http/httpconn.h"
+#include "log/log.h"
+#include "timer/heaptimer.h"
+#include "pool/sqlconnpool.h"
+#include "pool/threadpool.h"
+#include "pool/sqlconnRAII.h"
+#include "http/httpconn.h"
 
 class WebServer
 {
@@ -47,6 +47,7 @@ private:
     void SendError_(int fd, const char *info);
     void ExtentTime_(HttpConn *client);
     void CloseConn_(HttpConn *client);
+    void EndConn_(HttpConn *client);
 
     void OnRead_(HttpConn *client);
     void OnWrite_(HttpConn *client);

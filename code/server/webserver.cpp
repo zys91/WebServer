@@ -57,6 +57,17 @@ WebServer::~WebServer()
     SqlConnPool::Instance()->ClosePool();
 }
 
+/*
+ * 初始化事件工作模式
+ * EPOLLIN：表示对应的文件描述符可以读（包括对端SOCKET正常关闭）
+ * EPOLLOUT：表示对应的文件描述符可以写
+ * EPOLLPRI：表示对应的文件描述符有紧急的数据可读（这里应该表示有带外数据到来）
+ * EPOLLERR：表示对应的文件描述符发生错误
+ * EPOLLHUP：表示对应的文件描述符被挂断；读写关闭
+ * EPOLLRDHUP 表示读关闭
+ * EPOLLET：将EPOLL设为边缘触发(Edge Triggered)模式，这是相对于水平触发(Level Triggered)而言的
+ * EPOLLONESHOT：只监听一次事件，当监听完这次事件之后，如果还需要继续监听这个socket的话，需要再次把这个socket加入到EPOLL队列里
+ */
 void WebServer::InitEventMode_(int trigMode)
 {
     listenEvent_ = EPOLLRDHUP;
@@ -109,7 +120,7 @@ void WebServer::Start()
             else if (events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR))
             {
                 assert(users_.count(fd) > 0);
-                CloseConn_(&users_[fd]);
+                EndConn_(&users_[fd]);
             }
             else if (events & EPOLLIN)
             {
@@ -146,6 +157,13 @@ void WebServer::CloseConn_(HttpConn *client)
     LOG_INFO("Client[%d] quit!", client->GetFd());
     epoller_->DelFd(client->GetFd());
     client->Close();
+}
+
+void WebServer::EndConn_(HttpConn *client)
+{
+    assert(client);
+    LOG_INFO("Client[%d] quit!", client->GetFd());
+    timer_->doWork(client->GetFd());
 }
 
 void WebServer::AddClient_(int fd, sockaddr_in addr)
@@ -213,7 +231,7 @@ void WebServer::OnRead_(HttpConn *client)
     ret = client->read(&readErrno);
     if (ret <= 0 && readErrno != EAGAIN)
     {
-        CloseConn_(client);
+        EndConn_(client);
         return;
     }
     OnProcess(client);
@@ -255,7 +273,7 @@ void WebServer::OnWrite_(HttpConn *client)
             return;
         }
     }
-    CloseConn_(client);
+    EndConn_(client);
 }
 
 /* Create listenFd */
