@@ -8,19 +8,19 @@
 
 using namespace std;
 
+bool WebServer::isClose_ = false;
+
 WebServer::WebServer(
-    int port, int trigMode, int timeoutMS, bool OptLinger,
-    string sqlAddr, int sqlPort, const char *sqlUser, const char *sqlPwd,
+    int port, int trigMode, int timeoutMS, bool OptLinger, bool OptIPv6,
+    const char *sqlAddr, int sqlPort, const char *sqlUser, const char *sqlPwd,
     const char *dbName, int connPoolNum, int threadNum,
-    bool openLog, int logLevel, int logQueSize) : port_(port), openLinger_(OptLinger), timeoutMS_(timeoutMS), isClose_(false),
-                                                  timer_(new HeapTimer()), threadpool_(new ThreadPool(threadNum)), epoller_(new Epoller())
+    bool enableLog, int logLevel, int logQueSize) : port_(port), enableLinger_(OptLinger), enableIPv6_(OptIPv6), timeoutMS_(timeoutMS),
+                                                    timer_(new HeapTimer()), threadpool_(new ThreadPool(threadNum)), epoller_(new Epoller())
 {
-    srcDir_ = getcwd(nullptr, 256);
-    assert(srcDir_);
-    strncat(srcDir_, "/resources/", 16);
+    HttpConn::resDir = "./resources";
+    HttpConn::dataDir = "./data";
     HttpConn::userCount = 0;
-    HttpConn::srcDir = srcDir_;
-    SqlConnPool::Instance()->Init(sqlAddr.c_str(), sqlPort, sqlUser, sqlPwd, dbName, connPoolNum);
+    SqlConnPool::Instance()->Init(sqlAddr, sqlPort, sqlUser, sqlPwd, dbName, connPoolNum);
 
     InitEventMode_(trigMode);
     if (!InitSocket_())
@@ -28,7 +28,7 @@ WebServer::WebServer(
         isClose_ = true;
     }
 
-    if (openLog)
+    if (enableLog)
     {
         Log::Instance()->init(logLevel, "./log", ".log", logQueSize);
         if (isClose_)
@@ -38,12 +38,12 @@ WebServer::WebServer(
         else
         {
             LOG_INFO("========== Server init ==========");
-            LOG_INFO("Port:%d, OpenLinger: %s", port_, OptLinger ? "true" : "false");
-            LOG_INFO("Listen Mode: %s, OpenConn Mode: %s",
+            LOG_INFO("Port:%d, EnableLinger: %s EnableIpv6: %s", port_, OptLinger ? "true" : "false", OptIPv6 ? "true" : "false");
+            LOG_INFO("Listen Mode: %s, Connect Mode: %s",
                      (listenEvent_ & EPOLLET ? "ET" : "LT"),
                      (connEvent_ & EPOLLET ? "ET" : "LT"));
             LOG_INFO("LogSys level: %d", logLevel);
-            LOG_INFO("srcDir: %s", HttpConn::srcDir);
+            LOG_INFO("resDir: %s, dataDir: %s", HttpConn::resDir.c_str(), HttpConn::dataDir.c_str());
             LOG_INFO("SqlConnPool num: %d, ThreadPool num: %d", connPoolNum, threadNum);
         }
     }
@@ -51,9 +51,13 @@ WebServer::WebServer(
 
 WebServer::~WebServer()
 {
-    close(listenFd_);
+    LOG_INFO("========== Server quit ==========");
+    close(listenFdv4_);
+    if (enableIPv6_)
+    {
+        close(listenFdv6_);
+    }
     isClose_ = true;
-    free(srcDir_);
     SqlConnPool::Instance()->ClosePool();
 }
 
@@ -63,9 +67,9 @@ WebServer::~WebServer()
  * EPOLLOUT：表示对应的文件描述符可以写
  * EPOLLPRI：表示对应的文件描述符有紧急的数据可读（这里应该表示有带外数据到来）
  * EPOLLERR：表示对应的文件描述符发生错误
- * EPOLLHUP：表示对应的文件描述符被挂断；读写关闭
- * EPOLLRDHUP 表示读关闭
- * EPOLLET：将EPOLL设为边缘触发(Edge Triggered)模式，这是相对于水平触发(Level Triggered)而言的
+ * EPOLLHUP：表示对应的文件描述符被挂断，读写关闭 本端异常断开连接
+ * EPOLLRDHUP 表示读关闭 对方异常断开连接
+ * EPOLLET：将EPOLL设为边缘触发(Edge Triggered)模式，这是相对于水平触发(Level Triggered)而言的，默认是水平触发
  * EPOLLONESHOT：只监听一次事件，当监听完这次事件之后，如果还需要继续监听这个socket的话，需要再次把这个socket加入到EPOLL队列里
  */
 void WebServer::InitEventMode_(int trigMode)
@@ -113,10 +117,10 @@ void WebServer::Start()
             /* 处理事件 */
             int fd = epoller_->GetEventFd(i);
             uint32_t events = epoller_->GetEvents(i);
-            if (fd == listenFd_)
+            if (fd == listenFdv4_ || fd == listenFdv6_)
             {
-                DealListen_();
-            }
+                DealListen_(fd);
+            } // EPOLLRDHUP: 对方异常断开连接 EPOLLHUP: 本方异常断开连接 EPOLLERR: 错误
             else if (events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR))
             {
                 assert(users_.count(fd) > 0);
@@ -151,22 +155,24 @@ void WebServer::SendError_(int fd, const char *info)
     close(fd);
 }
 
+// CloseConn_为timer超时的回调函数
 void WebServer::CloseConn_(HttpConn *client)
 {
     assert(client);
-    LOG_INFO("Client[%d] quit!", client->GetFd());
+    LOG_INFO("Timeout -> Client[%d] quit!", client->GetFd());
     epoller_->DelFd(client->GetFd());
     client->Close();
 }
 
+// 主动关闭连接，并从timer中删除
 void WebServer::EndConn_(HttpConn *client)
 {
     assert(client);
-    LOG_INFO("Client[%d] quit!", client->GetFd());
+    LOG_INFO("Active close -> Client[%d] quit!", client->GetFd());
     timer_->doWork(client->GetFd());
 }
 
-void WebServer::AddClient_(int fd, sockaddr_in addr)
+void WebServer::AddClient_(int fd, sockaddr_storage addr)
 {
     assert(fd > 0);
     users_[fd].init(fd, addr);
@@ -179,13 +185,13 @@ void WebServer::AddClient_(int fd, sockaddr_in addr)
     LOG_INFO("Client[%d] in!", users_[fd].GetFd());
 }
 
-void WebServer::DealListen_()
+void WebServer::DealListen_(int listenFd)
 {
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
     socklen_t len = sizeof(addr);
     do
     {
-        int fd = accept(listenFd_, (struct sockaddr *)&addr, &len);
+        int fd = accept(listenFd, (struct sockaddr *)&addr, &len);
         if (fd <= 0)
         {
             return;
@@ -214,6 +220,7 @@ void WebServer::DealWrite_(HttpConn *client)
     threadpool_->AddTask(std::bind(&WebServer::OnWrite_, this, client));
 }
 
+// 延长一个连接的超时时间
 void WebServer::ExtentTime_(HttpConn *client)
 {
     assert(client);
@@ -276,76 +283,169 @@ void WebServer::OnWrite_(HttpConn *client)
     EndConn_(client);
 }
 
+void sig_handler(int signum)
+{
+    if (signum == SIGINT || signum == SIGTERM)
+        WebServer::isClose_ = true;
+}
+
 /* Create listenFd */
 bool WebServer::InitSocket_()
 {
     int ret;
-    struct sockaddr_in addr;
     if (port_ > 65535 || port_ < 1024)
     {
         LOG_ERROR("Port:%d error!", port_);
         return false;
     }
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port_);
+
+    struct sockaddr_in addr_v4;
+    addr_v4.sin_family = AF_INET;
+    addr_v4.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr_v4.sin_port = htons(port_);
+
+    struct sockaddr_in6 addr_v6;
+    addr_v6.sin6_family = AF_INET6;
+    addr_v6.sin6_addr = in6addr_any;
+    addr_v6.sin6_port = htons(port_);
+
     struct linger optLinger = {0};
-    if (openLinger_)
+    if (enableLinger_)
     {
         /* 优雅关闭: 直到所剩数据发送完毕或超时 */
         optLinger.l_onoff = 1;
         optLinger.l_linger = 1;
     }
 
-    listenFd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (listenFd_ < 0)
+    // 创建监听socket
+    listenFdv4_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (listenFdv4_ < 0)
     {
         LOG_ERROR("Create socket error!", port_);
         return false;
     }
 
-    ret = setsockopt(listenFd_, SOL_SOCKET, SO_LINGER, &optLinger, sizeof(optLinger));
+    if (enableIPv6_)
+    {
+        listenFdv6_ = socket(AF_INET6, SOCK_STREAM, 0);
+        if (listenFdv6_ < 0)
+        {
+            LOG_ERROR("Create socket error!", port_);
+            return false;
+        }
+    }
+
+    // 设置linger选项
+    ret = setsockopt(listenFdv4_, SOL_SOCKET, SO_LINGER, &optLinger, sizeof(optLinger));
     if (ret < 0)
     {
-        close(listenFd_);
+        close(listenFdv4_);
         LOG_ERROR("Init linger error!", port_);
         return false;
     }
 
+    if (enableIPv6_)
+    {
+        ret = setsockopt(listenFdv6_, SOL_SOCKET, SO_LINGER, &optLinger, sizeof(optLinger));
+        if (ret < 0)
+        {
+            close(listenFdv6_);
+            LOG_ERROR("Init linger error!", port_);
+            return false;
+        }
+    }
+
     int optval = 1;
-    /* 端口复用 */
-    /* 只有最后一个套接字会正常接收数据。 */
-    ret = setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
+
+    // 设置端口复用
+    ret = setsockopt(listenFdv4_, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
     if (ret == -1)
     {
         LOG_ERROR("set socket setsockopt error !");
-        close(listenFd_);
+        close(listenFdv4_);
         return false;
     }
 
-    ret = bind(listenFd_, (struct sockaddr *)&addr, sizeof(addr));
+    if (enableIPv6_)
+    {
+        ret = setsockopt(listenFdv6_, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
+        // 设置 IPv6 只监听v6地址，防止后面同时绑定发生冲突
+        ret = setsockopt(listenFdv6_, IPPROTO_IPV6, IPV6_V6ONLY, (const void *)&optval, sizeof(int));
+        if (ret == -1)
+        {
+            LOG_ERROR("set socket setsockopt error !");
+            close(listenFdv6_);
+            return false;
+        }
+    }
+
+    // 绑定地址
+    ret = bind(listenFdv4_, (struct sockaddr *)&addr_v4, sizeof(addr_v4));
     if (ret < 0)
     {
         LOG_ERROR("Bind Port:%d error!", port_);
-        close(listenFd_);
+        close(listenFdv4_);
         return false;
     }
 
-    ret = listen(listenFd_, 6);
+    if (enableIPv6_)
+    {
+        ret = bind(listenFdv6_, (struct sockaddr *)&addr_v6, sizeof(addr_v6));
+        if (ret < 0)
+        {
+            LOG_ERROR("Bind Port:%d error!", port_);
+            close(listenFdv6_);
+            return false;
+        }
+    }
+
+    // 监听，设置适当的最大挂起连接数
+    ret = listen(listenFdv4_, 128);
     if (ret < 0)
     {
         LOG_ERROR("Listen port:%d error!", port_);
-        close(listenFd_);
+        close(listenFdv4_);
         return false;
     }
-    ret = epoller_->AddFd(listenFd_, listenEvent_ | EPOLLIN);
+
+    if (enableIPv6_)
+    {
+        ret = listen(listenFdv6_, 128);
+        if (ret < 0)
+        {
+            LOG_ERROR("Listen port:%d error!", port_);
+            close(listenFdv6_);
+            return false;
+        }
+    }
+
+    // 添加到epoll中
+    ret = epoller_->AddFd(listenFdv4_, listenEvent_ | EPOLLIN);
     if (ret == 0)
     {
         LOG_ERROR("Add listen error!");
-        close(listenFd_);
+        close(listenFdv4_);
         return false;
     }
-    SetFdNonblock(listenFd_);
+    SetFdNonblock(listenFdv4_);
+
+    if (enableIPv6_)
+    {
+        ret = epoller_->AddFd(listenFdv6_, listenEvent_ | EPOLLIN);
+        if (ret == 0)
+        {
+            LOG_ERROR("Add listen error!");
+            close(listenFdv6_);
+            return false;
+        }
+        SetFdNonblock(listenFdv6_);
+    }
+
+    // 屏蔽管道信号 SIGPIPE: Broken pipe 防止程序向已关闭的socket写数据时，系统向进程发送SIGPIPE信号，导致进程退出
+    signal(SIGPIPE, SIG_IGN);
+    // 注册信号处理函数 SIGINT: Ctrl+C SIGTERM: kill
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
     LOG_INFO("Server port:%d", port_);
     return true;
 }

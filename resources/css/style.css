@@ -1,5 +1,5 @@
 
-@import url('https://fonts.googleapis.com/css?family=Muli:200,300,400');
+/* @import url('https://fonts.googleapis.com/css?family=Muli:200,300,400'); */
 
 body {
   background: #ffffff;
@@ -37,6 +37,14 @@ h2 {
   font-size: 40px;
   line-height: 52px;
   margin-top: 0px;
+}
+
+h3{
+  color: #575757;
+  font-size: 30px;
+  line-height: normal;
+  margin-top: 15px;
+  margin-bottom: 15px;
 }
 
 h4 {
@@ -188,10 +196,6 @@ a:hover, a:active, a:focus {
   border: 1px solid #000000;
   border-top-color: #f9f9f9;
   animation: spinner .9s linear infinite;
-}
-
-@-webkit-@keyframes spinner {
-  to {transform: rotate(360deg);}
 }
 
 @keyframes spinner {
@@ -473,6 +477,36 @@ a:hover, a:active, a:focus {
 .social-icon li a:hover {
   background: #d7b065;
   transform: scale(1.1);
+}
+
+
+/*---------------------------------------
+  File list
+-----------------------------------------*/
+.file-list {
+  list-style: none;
+  padding: 0;
+}
+
+.file-list li {
+  display: inline-block;
+  padding: 10px 0;
+  border-bottom: 1px solid #ccc;
+}
+
+.file-list .file-name {
+  flex: 1;
+  margin-right: 10px;
+}
+
+.file-list .file-size,
+.file-list .upload-date {
+  text-align: center;
+}
+
+.file-list .btn-delete,
+.file-list .btn-download {
+  text-align: center;
 }
 
 

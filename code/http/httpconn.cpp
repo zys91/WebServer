@@ -6,8 +6,9 @@
 #include "httpconn.h"
 using namespace std;
 
-const char *HttpConn::srcDir;
-std::atomic<int> HttpConn::userCount;
+string HttpConn::resDir;
+string HttpConn::dataDir;
+atomic<int> HttpConn::userCount;
 bool HttpConn::isET;
 
 HttpConn::HttpConn()
@@ -22,7 +23,7 @@ HttpConn::~HttpConn()
     Close();
 };
 
-void HttpConn::init(int fd, const sockaddr_in &addr)
+void HttpConn::init(int fd, const sockaddr_storage &addr)
 {
     assert(fd > 0);
     userCount++;
@@ -30,8 +31,9 @@ void HttpConn::init(int fd, const sockaddr_in &addr)
     fd_ = fd;
     writeBuff_.RetrieveAll();
     readBuff_.RetrieveAll();
+    request_.Init(resDir, dataDir);
     isClose_ = false;
-    LOG_INFO("Client[%d](%s:%d) in, userCount:%d", fd_, GetIP(), GetPort(), (int)userCount);
+    LOG_INFO("Client[%d](%s:%d) in, userCount:%d", fd_, GetIP().c_str(), GetPort(), (int)userCount);
 }
 
 void HttpConn::Close()
@@ -42,7 +44,7 @@ void HttpConn::Close()
         isClose_ = true;
         userCount--;
         close(fd_);
-        LOG_INFO("Client[%d](%s:%d) quit, UserCount:%d", fd_, GetIP(), GetPort(), (int)userCount);
+        LOG_INFO("Client[%d](%s:%d) quit, UserCount:%d", fd_, GetIP().c_str(), GetPort(), (int)userCount);
     }
 }
 
@@ -51,19 +53,41 @@ int HttpConn::GetFd() const
     return fd_;
 };
 
-struct sockaddr_in HttpConn::GetAddr() const
+sockaddr_storage HttpConn::GetAddr() const
 {
     return addr_;
 }
 
-const char *HttpConn::GetIP() const
+string HttpConn::GetIP() const
 {
-    return inet_ntoa(addr_.sin_addr);
+    if (addr_.ss_family == AF_INET)
+    {
+        const sockaddr_in *ipv4Addr = reinterpret_cast<const sockaddr_in *>(&addr_);
+        char ipv4Str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(ipv4Addr->sin_addr), ipv4Str, INET_ADDRSTRLEN);
+        return string(ipv4Str);
+    }
+    else
+    {
+        const sockaddr_in6 *ipv6Addr = reinterpret_cast<const sockaddr_in6 *>(&addr_);
+        char ipv6Str[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, &(ipv6Addr->sin6_addr), ipv6Str, INET6_ADDRSTRLEN);
+        return string(ipv6Str);
+    }
 }
 
-int HttpConn::GetPort() const
+uint16_t HttpConn::GetPort() const
 {
-    return addr_.sin_port;
+    if (addr_.ss_family == AF_INET)
+    {
+        const sockaddr_in *ipv4Addr = reinterpret_cast<const sockaddr_in *>(&addr_);
+        return ntohs(ipv4Addr->sin_port);
+    }
+    else
+    {
+        const sockaddr_in6 *ipv6Addr = reinterpret_cast<const sockaddr_in6 *>(&addr_);
+        return ntohs(ipv6Addr->sin6_port);
+    }
 }
 
 ssize_t HttpConn::read(int *saveErrno)
@@ -121,7 +145,7 @@ bool HttpConn::process()
 {
     if (request_.State() == HttpRequest::FINISH)
     {
-        request_.Init();
+        request_.Init(resDir, dataDir);
     }
 
     if (readBuff_.ReadableBytes() <= 0)
@@ -129,19 +153,21 @@ bool HttpConn::process()
         return false;
     }
 
+    LOG_DEBUG("Client[%d] process...", fd_);
     HttpRequest::HTTP_CODE processStatus = request_.parse(readBuff_);
     if (processStatus == HttpRequest::GET_REQUEST)
     {
-        LOG_DEBUG("%s", request_.path().c_str());
-        response_.Init(srcDir, request_.path(), request_.IsKeepAlive(), 200);
+        LOG_DEBUG("req:[%d]%s", request_.reqType(), request_.reqRes().c_str());
+        response_.Init(request_.reqType(), request_.reqRes(), request_.IsKeepAlive(), 200);
     }
     else if (processStatus == HttpRequest::NO_REQUEST)
     {
+        LOG_DEBUG("Client[%d] wait next...", fd_);
         return false;
     }
     else
     {
-        response_.Init(srcDir, request_.path(), false, 400);
+        response_.Init(request_.reqType(), request_.reqRes(), false, 400);
     }
 
     response_.MakeResponse(writeBuff_);
@@ -157,6 +183,6 @@ bool HttpConn::process()
         iov_[1].iov_len = response_.FileLen();
         iovCnt_ = 2;
     }
-    LOG_DEBUG("filesize:%d, %d  to %d", response_.FileLen(), iovCnt_, ToWriteBytes());
+    LOG_DEBUG("Client[%d] response filesize:%d, %d  to %d", fd_, response_.FileLen(), iovCnt_, ToWriteBytes());
     return true;
 }

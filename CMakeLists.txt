@@ -25,9 +25,9 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -O3")
 
 # 添加相关头文件目录
-# include_directories(
-#     ${PROJECT_SOURCE_DIR}/include
-# )
+include_directories(
+    ${PROJECT_SOURCE_DIR}/include
+)
 
 # 添加子目录以构建库和可执行文件
 add_subdirectory(code)

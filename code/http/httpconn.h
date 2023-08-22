@@ -9,7 +9,7 @@
 
 #include <sys/types.h>
 #include <sys/uio.h>   // readv/writev
-#include <arpa/inet.h> // sockaddr_in
+#include <arpa/inet.h> // sockaddr
 #include <stdlib.h>    // atoi()
 #include <errno.h>
 
@@ -26,7 +26,7 @@ public:
 
     ~HttpConn();
 
-    void init(int sockFd, const sockaddr_in &addr);
+    void init(int sockFd, const sockaddr_storage &addr);
 
     ssize_t read(int *saveErrno);
 
@@ -36,11 +36,11 @@ public:
 
     int GetFd() const;
 
-    int GetPort() const;
+    uint16_t GetPort() const;
 
-    const char *GetIP() const;
+    std::string GetIP() const;
 
-    sockaddr_in GetAddr() const;
+    sockaddr_storage GetAddr() const;
 
     bool process();
 
@@ -55,12 +55,13 @@ public:
     }
 
     static bool isET;
-    static const char *srcDir;
+    static std::string resDir;
+    static std::string dataDir;
     static std::atomic<int> userCount;
 
 private:
     int fd_;
-    struct sockaddr_in addr_;
+    struct sockaddr_storage addr_;
 
     bool isClose_;
 

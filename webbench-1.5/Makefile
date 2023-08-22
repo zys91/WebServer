@@ -1,14 +1,14 @@
-CFLAGS?=	-Wall -ggdb -W -O
-CC?=		gcc
+CFLAGS?=-Wall -ggdb -W -O
+CC?=gcc
 LIBS?=
 LDFLAGS?=
-PREFIX?=	/usr/local
+PREFIX?=/usr/local
 VERSION=1.5
 TMPDIR=/tmp/webbench-$(VERSION)
 
-all:   webbench tags
+all: webbench tags
 
-tags:  *.c
+tags: *.c
 	-ctags *.c
 
 install: webbench
@@ -24,7 +24,7 @@ webbench: webbench.o Makefile
 clean:
 	-rm -f *.o webbench *~ core *.core tags
 	
-tar:   clean
+tar: clean
 	-debian/rules clean
 	rm -rf $(TMPDIR)
 	install -d $(TMPDIR)

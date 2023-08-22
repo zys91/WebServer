@@ -11,6 +11,7 @@
 #include <unistd.h> // close()
 #include <assert.h>
 #include <errno.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -27,20 +28,21 @@ class WebServer
 {
 public:
     WebServer(
-        int port, int trigMode, int timeoutMS, bool OptLinger,
-        std::string sqlAddr, int sqlPort, const char *sqlUser, const char *sqlPwd,
+        int port, int trigMode, int timeoutMS, bool OptLinger, bool OptIPv6,
+        const char *sqlAddr, int sqlPort, const char *sqlUser, const char *sqlPwd,
         const char *dbName, int connPoolNum, int threadNum,
-        bool openLog, int logLevel, int logQueSize);
+        bool enableLog, int logLevel, int logQueSize);
 
     ~WebServer();
     void Start();
+    static bool isClose_;
 
 private:
     bool InitSocket_();
     void InitEventMode_(int trigMode);
-    void AddClient_(int fd, sockaddr_in addr);
+    void AddClient_(int fd, sockaddr_storage addr);
 
-    void DealListen_();
+    void DealListen_(int listenFd);
     void DealWrite_(HttpConn *client);
     void DealRead_(HttpConn *client);
 
@@ -58,11 +60,11 @@ private:
     static int SetFdNonblock(int fd);
 
     int port_;
-    bool openLinger_;
+    bool enableLinger_;
+    bool enableIPv6_;
     int timeoutMS_; /* 毫秒MS */
-    bool isClose_;
-    int listenFd_;
-    char *srcDir_;
+    int listenFdv4_;
+    int listenFdv6_;
 
     uint32_t listenEvent_;
     uint32_t connEvent_;

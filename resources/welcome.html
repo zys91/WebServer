@@ -50,11 +50,9 @@
           </div>
      </div>
      <!-- HOME SECTION -->
-     <section id="home">
-
+     <!-- <section id="home">
           <div class="container">
                <div class="row">
-
                     <div class="col-md-offset-1 col-md-2 col-sm-3">
                          <img src="images/profile-image.jpg" class="wow fadeInUp img-responsive img-circle"
                               data-wow-delay="0.2s" alt="about image">
@@ -62,12 +60,44 @@
 
                     <div class="col-md-8 col-sm-8">
                          <h1 class="wow fadeInUp" data-wow-delay="0.6s"> 欢迎您！</h1>
-                         <!-- <a href="#" class="wow fadeInUp btn btn-default section-btn" data-wow-delay="1s">下载简历</a> -->
                     </div>
+               </div>
+          </div>
+     </section> -->
 
+     <section id="home">
+          <div class="container">
+               <div class="row">
+                    <div class="col-md-offset-2 col-md-8">
+                         <h3 class="wow fadeInUp" data-wow-delay="0.4s">文件上传</h3>
+                         <form id="upload-form" enctype="multipart/form-data">
+                              <div class="input-group">
+                                   <input type="file" name="file" id="file-input" class="form-control">
+                                   <span class="input-group-btn">
+                                        <button type="submit" class="btn btn-primary" id="upload-btn"
+                                             disabled>上传</button>
+                                   </span>
+                              </div>
+                         </form>
+                    </div>
+               </div>
+
+               <div class="row">
+                    <div class="col-md-offset-2 col-md-8">
+                         <h3 class="wow fadeInUp" data-wow-delay="0.4s">文件列表</h3>
+                         <ul id="file-list-ul" class="file-list">
+                              <!-- Uploaded files will be listed here -->
+                              <!-- <span class="file-name">123</span>
+                              <span class="file-size">1.2M</span>
+                              <span class="upload-date">2023-08-20T12:34:56Z</span>
+                              <button class="btn btn-link btn-delete" data-file="123">删除</button>
+                              <a class="btn btn-link btn-download" href="/download/123" target="_blank">下载</a> -->
+                         </ul>
+                    </div>
                </div>
           </div>
      </section>
+
      <!-- SCRIPTS -->
      <script src="js/jquery.js"></script>
      <script src="js/bootstrap.min.js"></script>
@@ -76,6 +106,8 @@
      <script src="js/magnific-popup-options.js"></script>
      <script src="js/wow.min.js"></script>
      <script src="js/custom.js"></script>
+     <script src="js/upload.js"></script>
+
 </body>
 
 </html>

@@ -45,7 +45,8 @@ const unordered_map<int, string> HttpResponse::CODE_PATH = {
 HttpResponse::HttpResponse()
 {
     code_ = -1;
-    path_ = srcDir_ = "";
+    reqType_ = -1;
+    reqRes_ = "";
     isKeepAlive_ = false;
     mmFile_ = nullptr;
     mmFileStat_ = {0};
@@ -56,36 +57,44 @@ HttpResponse::~HttpResponse()
     UnmapFile();
 }
 
-void HttpResponse::Init(const string &srcDir, string &path, bool isKeepAlive, int code)
+void HttpResponse::Init(int reqType, string &reqRes, bool isKeepAlive, int code)
 {
-    assert(srcDir != "");
     if (mmFile_)
     {
         UnmapFile();
     }
     code_ = code;
     isKeepAlive_ = isKeepAlive;
-    path_ = path;
-    srcDir_ = srcDir;
+    reqType_ = reqType;
+    reqRes_ = reqRes;
     mmFile_ = nullptr;
     mmFileStat_ = {0};
 }
 
 void HttpResponse::MakeResponse(Buffer &buff)
 {
-    /* 判断请求的资源文件 */
-    if (stat((srcDir_ + path_).data(), &mmFileStat_) < 0 || S_ISDIR(mmFileStat_.st_mode))
+    // 判断请求的资源类型
+    if (reqType_ == HttpRequest::GET_HTML || reqType_ == HttpRequest::GET_FILE)
     {
-        code_ = 404;
+        /* 判断请求的资源文件 */
+        if (reqRes_.empty() || stat((reqRes_).data(), &mmFileStat_) < 0 || S_ISDIR(mmFileStat_.st_mode))
+        {
+            code_ = 404;
+        }
+        else if (!(mmFileStat_.st_mode & S_IROTH))
+        {
+            code_ = 403;
+        }
+        else if (code_ == -1)
+        {
+            code_ = 200;
+        }
     }
-    else if (!(mmFileStat_.st_mode & S_IROTH))
-    {
-        code_ = 403;
-    }
-    else if (code_ == -1)
+    else if (reqType_ == HttpRequest::GET_INFO)
     {
         code_ = 200;
     }
+
     ErrorHtml_();
     AddStateLine_(buff);
     AddHeader_(buff);
@@ -104,17 +113,17 @@ size_t HttpResponse::FileLen() const
 
 void HttpResponse::ErrorHtml_()
 {
-    if (CODE_PATH.count(code_) == 1)
+    if (CODE_PATH.count(code_))
     {
-        path_ = CODE_PATH.find(code_)->second;
-        stat((srcDir_ + path_).data(), &mmFileStat_);
+        reqRes_ = CODE_PATH.find(code_)->second;
+        stat((reqRes_).data(), &mmFileStat_);
     }
 }
 
 void HttpResponse::AddStateLine_(Buffer &buff)
 {
     string status;
-    if (CODE_STATUS.count(code_) == 1)
+    if (CODE_STATUS.count(code_))
     {
         status = CODE_STATUS.find(code_)->second;
     }
@@ -138,30 +147,53 @@ void HttpResponse::AddHeader_(Buffer &buff)
     {
         buff.Append("close\r\n");
     }
-    buff.Append("Content-type: " + GetFileType_() + "\r\n");
+
+    if (reqType_ == HttpRequest::GET_HTML)
+    {
+        buff.Append("Content-Type: " + GetFileType_() + "\r\n");
+    }
+    else if (reqType_ == HttpRequest::GET_FILE)
+    {
+        buff.Append("Content-Type: " + GetFileType_() + "\r\n");
+        // Set the Content-Disposition header to specify the file name for download
+        string fileName = reqRes_.substr(reqRes_.find_last_of('/') + 1);
+        buff.Append("Content-Disposition: attachment; filename=\"" + fileName + "\"\r\n");
+    }
+    else if (reqType_ == HttpRequest::GET_INFO)
+    {
+        buff.Append("Content-Type: application/json\r\n");
+    }
 }
 
 void HttpResponse::AddContent_(Buffer &buff)
 {
-    int srcFd = open((srcDir_ + path_).data(), O_RDONLY);
-    if (srcFd < 0)
+    if (reqType_ == HttpRequest::GET_HTML || reqType_ == HttpRequest::GET_FILE)
     {
-        ErrorContent(buff, "File Not Found!");
-        return;
-    }
+        int srcFd = open((reqRes_).data(), O_RDONLY);
+        if (srcFd < 0)
+        {
+            ErrorContent(buff, "File Not Found!");
+            return;
+        }
 
-    /* 将文件映射到内存提高文件的访问速度
-        MAP_PRIVATE 建立一个写入时拷贝的私有映射*/
-    LOG_DEBUG("file path %s", (srcDir_ + path_).data());
-    int *mmRet = (int *)mmap(0, mmFileStat_.st_size, PROT_READ, MAP_PRIVATE, srcFd, 0);
-    if (*mmRet == -1)
-    {
-        ErrorContent(buff, "File Not Found!");
-        return;
+        /* 将文件映射到内存提高文件的访问速度
+            MAP_PRIVATE 建立一个写入时拷贝的私有映射*/
+        LOG_DEBUG("file path %s", (reqRes_).data());
+        int *mmRet = (int *)mmap(0, mmFileStat_.st_size, PROT_READ, MAP_PRIVATE, srcFd, 0);
+        if (*mmRet == -1)
+        {
+            ErrorContent(buff, "File Not Found!");
+            return;
+        }
+        mmFile_ = (char *)mmRet;
+        close(srcFd);
+        buff.Append("Content-Length: " + to_string(mmFileStat_.st_size) + "\r\n\r\n");
     }
-    mmFile_ = (char *)mmRet;
-    close(srcFd);
-    buff.Append("Content-length: " + to_string(mmFileStat_.st_size) + "\r\n\r\n");
+    else if (reqType_ == HttpRequest::GET_INFO)
+    {
+        buff.Append("Content-Length: " + to_string(reqRes_.size()) + "\r\n\r\n");
+        buff.Append(reqRes_);
+    }
 }
 
 void HttpResponse::UnmapFile()
@@ -176,17 +208,18 @@ void HttpResponse::UnmapFile()
 string HttpResponse::GetFileType_()
 {
     /* 判断文件类型 */
-    string::size_type idx = path_.find_last_of('.');
+    string::size_type idx = reqRes_.find_last_of('.');
     if (idx == string::npos)
     {
-        return "text/plain";
+        return "application/octet-stream";
     }
-    string suffix = path_.substr(idx);
-    if (SUFFIX_TYPE.count(suffix) == 1)
+    string suffix = reqRes_.substr(idx);
+    transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower); // Convert to lowercase
+    if (SUFFIX_TYPE.count(suffix))
     {
         return SUFFIX_TYPE.find(suffix)->second;
     }
-    return "text/plain";
+    return "application/octet-stream";
 }
 
 void HttpResponse::ErrorContent(Buffer &buff, string message)
@@ -195,7 +228,7 @@ void HttpResponse::ErrorContent(Buffer &buff, string message)
     string status;
     body += "<html><title>Error</title>";
     body += "<body bgcolor=\"ffffff\">";
-    if (CODE_STATUS.count(code_) == 1)
+    if (CODE_STATUS.count(code_))
     {
         status = CODE_STATUS.find(code_)->second;
     }
@@ -207,6 +240,6 @@ void HttpResponse::ErrorContent(Buffer &buff, string message)
     body += "<p>" + message + "</p>";
     body += "<hr><em>TinyWebServer</em></body></html>";
 
-    buff.Append("Content-length: " + to_string(body.size()) + "\r\n\r\n");
+    buff.Append("Content-Length: " + to_string(body.size()) + "\r\n\r\n");
     buff.Append(body);
 }

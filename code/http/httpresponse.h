@@ -14,6 +14,7 @@
 
 #include "buffer/buffer.h"
 #include "log/log.h"
+#include "http/httprequest.h"
 
 class HttpResponse
 {
@@ -21,7 +22,7 @@ public:
     HttpResponse();
     ~HttpResponse();
 
-    void Init(const std::string &srcDir, std::string &path, bool isKeepAlive = false, int code = -1);
+    void Init(int reqType, std::string &reqRes, bool isKeepAlive = false, int code = -1);
     void MakeResponse(Buffer &buff);
     void UnmapFile();
     char *File();
@@ -40,8 +41,8 @@ private:
     int code_;
     bool isKeepAlive_;
 
-    std::string path_;
-    std::string srcDir_;
+    int reqType_;
+    std::string reqRes_;
 
     char *mmFile_;
     struct stat mmFileStat_;
