@@ -6,13 +6,10 @@
 #ifndef SQLCONNPOOL_H
 #define SQLCONNPOOL_H
 
-#include <mysql/mysql.h>
-#include <string>
 #include <queue>
 #include <mutex>
 #include <semaphore.h>
-#include <thread>
-#include "log/log.h"
+#include <mysql/mysql.h>
 
 class SqlConnPool
 {

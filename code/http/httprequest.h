@@ -6,21 +6,13 @@
 #ifndef HTTP_REQUEST_H
 #define HTTP_REQUEST_H
 
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
-#include <fstream>
-#include <dirent.h>
-#include <sys/stat.h>
 #include <string>
-#include <regex>
-#include <errno.h>
-#include <mysql/mysql.h> //mysql
 
 #include "json/json.hpp"
 #include "buffer/buffer.h"
-#include "log/log.h"
-#include "pool/sqlconnpool.h"
-#include "pool/sqlconnRAII.h"
 
 class HttpRequest
 {

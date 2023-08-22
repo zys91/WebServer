@@ -5,6 +5,14 @@
  */
 #include "log.h"
 
+#include <mutex>
+#include <string>
+#include <assert.h>
+#include <stdio.h>
+#include <stdarg.h>   // vastart va_end
+#include <sys/time.h>
+#include <sys/stat.h> // mkdir
+
 using namespace std;
 
 Log::Log()

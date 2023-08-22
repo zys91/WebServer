@@ -4,6 +4,17 @@
  * @copyleft Apache 2.0
  */
 #include "httprequest.h"
+
+#include <fstream>
+#include <regex>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <mysql/mysql.h> //mysql
+
+#include "log/log.h"
+#include "pool/sqlconnpool.h"
+#include "pool/sqlconnRAII.h"
+
 using namespace std;
 
 const unordered_set<string> HttpRequest::DEFAULT_HTML{

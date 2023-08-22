@@ -5,7 +5,7 @@
  */
 
 #include <iostream>
-#include <unistd.h>
+#include <unistd.h> // daemon
 
 #include "server/webserver.h"
 #include "config/config.h"

@@ -6,15 +6,11 @@
 #ifndef HEAP_TIMER_H
 #define HEAP_TIMER_H
 
-#include <queue>
-#include <unordered_map>
-#include <time.h>
-#include <algorithm>
-#include <arpa/inet.h>
-#include <functional>
-#include <assert.h>
 #include <chrono>
-#include "log/log.h"
+#include <functional>
+#include <unordered_map>
+#include <vector>
+#include <mutex>
 
 typedef std::function<void()> TimeoutCallBack;
 typedef std::chrono::high_resolution_clock Clock;

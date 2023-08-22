@@ -4,6 +4,10 @@
  * @copyleft Apache 2.0
  */
 #include "heaptimer.h"
+
+#include <algorithm>
+#include <assert.h>
+
 using namespace std;
 
 void HeapTimer::siftup_(size_t i)

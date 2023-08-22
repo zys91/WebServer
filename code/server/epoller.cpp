@@ -6,6 +6,11 @@
 
 #include "epoller.h"
 
+#include <fcntl.h>     // fcntl
+#include <unistd.h>    // close
+#include <assert.h>
+#include <errno.h>
+
 // 创建 epoll 句柄，__size 为 epoll 最大监听数，只是一个提示，并不是硬性限制；maxEvent 为 epoll_wait 最多监听的事件数，也只是一个提示，会动态增长
 Epoller::Epoller(int maxEvent) : epollFd_(epoll_create(512)), events_(maxEvent)
 {

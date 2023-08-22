@@ -5,6 +5,14 @@
  */
 #include "buffer.h"
 
+#include <iostream>
+#include <assert.h>
+#include <cstring>   // bzero
+#include <unistd.h>  // write
+#include <sys/uio.h> // readv
+
+using namespace std;
+
 Buffer::Buffer(int initBuffSize) : buffer_(initBuffSize), readPos_(0), writePos_(0) {}
 
 size_t Buffer::ReadableBytes() const
@@ -46,9 +54,9 @@ void Buffer::RetrieveAll()
     writePos_ = 0;
 }
 
-std::string Buffer::RetrieveAllToStr()
+string Buffer::RetrieveAllToStr()
 {
-    std::string str(Peek(), ReadableBytes());
+    string str(Peek(), ReadableBytes());
     RetrieveAll();
     return str;
 }
@@ -68,7 +76,7 @@ void Buffer::HasWritten(size_t len)
     writePos_ += len;
 }
 
-void Buffer::Append(const std::string &str)
+void Buffer::Append(const string &str)
 {
     Append(str.data(), str.length());
 }
@@ -83,7 +91,7 @@ void Buffer::Append(const char *str, size_t len)
 {
     assert(str);
     EnsureWriteable(len);
-    std::copy(str, str + len, BeginWrite());
+    copy(str, str + len, BeginWrite());
     HasWritten(len);
 }
 
@@ -161,7 +169,7 @@ void Buffer::MakeSpace_(size_t len)
     else
     {
         size_t readable = ReadableBytes();
-        std::copy(BeginPtr_() + readPos_, BeginPtr_() + writePos_, BeginPtr_());
+        copy(BeginPtr_() + readPos_, BeginPtr_() + writePos_, BeginPtr_());
         readPos_ = 0;
         writePos_ = readPos_ + readable;
         assert(readable == ReadableBytes());

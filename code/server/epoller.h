@@ -6,12 +6,8 @@
 #ifndef EPOLLER_H
 #define EPOLLER_H
 
-#include <sys/epoll.h> //epoll_ctl()
-#include <fcntl.h>     // fcntl()
-#include <unistd.h>    // close()
-#include <assert.h>    // close()
+#include <sys/epoll.h>
 #include <vector>
-#include <errno.h>
 
 class Epoller
 {

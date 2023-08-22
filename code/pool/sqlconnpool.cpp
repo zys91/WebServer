@@ -5,6 +5,11 @@
  */
 
 #include "sqlconnpool.h"
+
+#include <assert.h>
+
+#include "log/log.h"
+
 using namespace std;
 
 SqlConnPool::SqlConnPool()

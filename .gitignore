@@ -1,10 +1,11 @@
 *.o
-*.1
-*.log
+*.log*
 *.exe
 .vscode
 build
 bin
+log
+data
 CMakeFiles
 CMakeCache.txt
 cmake_install.cmake

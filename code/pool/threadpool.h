@@ -12,6 +12,8 @@
 #include <queue>
 #include <thread>
 #include <functional>
+#include <assert.h>
+
 class ThreadPool
 {
 public:

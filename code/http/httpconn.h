@@ -7,14 +7,11 @@
 #ifndef HTTP_CONN_H
 #define HTTP_CONN_H
 
+#include <string>
+#include <atomic>
 #include <sys/types.h>
-#include <sys/uio.h>   // readv/writev
 #include <arpa/inet.h> // sockaddr
-#include <stdlib.h>    // atoi()
-#include <errno.h>
 
-#include "log/log.h"
-#include "pool/sqlconnRAII.h"
 #include "buffer/buffer.h"
 #include "httprequest.h"
 #include "httpresponse.h"

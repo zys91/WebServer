@@ -4,6 +4,14 @@
  * @copyleft Apache 2.0
  */
 #include "httpconn.h"
+
+#include <unistd.h>  // close
+#include <sys/uio.h> // readv/writev
+#include <errno.h>
+
+#include "log/log.h"
+#include "pool/sqlconnRAII.h"
+
 using namespace std;
 
 string HttpConn::resDir;

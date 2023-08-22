@@ -6,6 +6,17 @@
 
 #include "webserver.h"
 
+#include <fcntl.h>  // fcntl
+#include <unistd.h> // close
+#include <assert.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/socket.h>
+
+#include "log/log.h"
+#include "pool/sqlconnpool.h"
+#include "pool/sqlconnRAII.h"
+
 using namespace std;
 
 bool WebServer::isClose_ = false;
@@ -178,7 +189,7 @@ void WebServer::AddClient_(int fd, sockaddr_storage addr)
     users_[fd].init(fd, addr);
     if (timeoutMS_ > 0)
     {
-        timer_->add(fd, timeoutMS_, std::bind(&WebServer::CloseConn_, this, &users_[fd]));
+        timer_->add(fd, timeoutMS_, bind(&WebServer::CloseConn_, this, &users_[fd]));
     }
     epoller_->AddFd(fd, EPOLLIN | connEvent_);
     SetFdNonblock(fd);
@@ -210,14 +221,14 @@ void WebServer::DealRead_(HttpConn *client)
 {
     assert(client);
     ExtentTime_(client);
-    threadpool_->AddTask(std::bind(&WebServer::OnRead_, this, client));
+    threadpool_->AddTask(bind(&WebServer::OnRead_, this, client));
 }
 
 void WebServer::DealWrite_(HttpConn *client)
 {
     assert(client);
     ExtentTime_(client);
-    threadpool_->AddTask(std::bind(&WebServer::OnWrite_, this, client));
+    threadpool_->AddTask(bind(&WebServer::OnWrite_, this, client));
 }
 
 // 延长一个连接的超时时间

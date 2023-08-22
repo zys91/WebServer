@@ -5,6 +5,13 @@
  */
 #include "httpresponse.h"
 
+#include <fcntl.h>    // open
+#include <unistd.h>   // close
+#include <sys/mman.h> // mmap, munmap
+
+#include "log/log.h"
+#include "http/httprequest.h"
+
 using namespace std;
 
 const unordered_map<string, string> HttpResponse::SUFFIX_TYPE = {
