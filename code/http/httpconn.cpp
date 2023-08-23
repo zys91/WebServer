@@ -5,9 +5,11 @@
  */
 #include "httpconn.h"
 
-#include <unistd.h>  // close
-#include <sys/uio.h> // readv/writev
 #include <errno.h>
+#include <fcntl.h>        // open
+#include <unistd.h>       // close
+#include <sys/uio.h>      // readv/writev
+#include <sys/sendfile.h> // sendfile
 
 #include "log/log.h"
 #include "pool/sqlconnRAII.h"
@@ -47,6 +49,7 @@ void HttpConn::init(int fd, const sockaddr_storage &addr)
 void HttpConn::Close()
 {
     response_.UnmapFile();
+    response_.CloseFile();
     if (isClose_ == false)
     {
         isClose_ = true;
@@ -118,18 +121,28 @@ ssize_t HttpConn::write(int *saveErrno)
     ssize_t len = -1;
     do
     {
-        len = writev(fd_, iov_, iovCnt_);
+        if (iovCnt_ == 1 && iov_[0].iov_len == 0 && iov_[1].iov_len > 0) // SENDFILE
+        {
+            off_t offset = response_.FileLen() - iov_[1].iov_len;
+            len = sendfile(fd_, response_.FileFd(), &offset, response_.FileLen());
+            iov_[1].iov_len -= len;
+        }
+        else
+        {
+            len = writev(fd_, iov_, iovCnt_);
+        }
+
         if (len <= 0)
         {
             *saveErrno = errno;
             break;
         }
 
-        if (iov_[0].iov_len + iov_[1].iov_len == 0)
+        if (ToWriteBytes() == 0)
         {
             break; /* 传输结束 */
         }
-        else if (static_cast<size_t>(len) > iov_[0].iov_len)
+        else if (iovCnt_ > 1 && static_cast<size_t>(len) > iov_[0].iov_len) // MMAP
         {
             iov_[1].iov_base = (uint8_t *)iov_[1].iov_base + (len - iov_[0].iov_len);
             iov_[1].iov_len -= (len - iov_[0].iov_len);
@@ -139,13 +152,19 @@ ssize_t HttpConn::write(int *saveErrno)
                 iov_[0].iov_len = 0;
             }
         }
-        else
+        else if (iov_[0].iov_len != 0)
         {
             iov_[0].iov_base = (uint8_t *)iov_[0].iov_base + len;
             iov_[0].iov_len -= len;
             writeBuff_.Retrieve(len);
         }
     } while (ToWriteBytes() > 0);
+
+    if (ToWriteBytes() == 0)
+    {
+        response_.CloseFile();
+        response_.UnmapFile();
+    }
     return len;
 }
 
@@ -185,12 +204,30 @@ bool HttpConn::process()
     iovCnt_ = 1;
 
     /* 文件 */
-    if (response_.FileLen() > 0 && response_.File())
+    if (response_.FileTransMethod() == HttpResponse::MMAP)
     {
-        iov_[1].iov_base = response_.File();
-        iov_[1].iov_len = response_.FileLen();
-        iovCnt_ = 2;
+        if (response_.FileLen() > 0 && response_.FilePtr())
+        {
+            iov_[1].iov_base = response_.FilePtr();
+            iov_[1].iov_len = response_.FileLen();
+            iovCnt_ = 2;
+        }
     }
+    else if (response_.FileTransMethod() == HttpResponse::SENDFILE)
+    {
+        if (response_.FileLen() > 0 && response_.FileFd() != -1)
+        {
+            iov_[1].iov_base = nullptr;
+            iov_[1].iov_len = response_.FileLen();
+            iovCnt_ = 1;
+        }
+    }
+    else // NONE
+    {
+        iov_[1].iov_base = nullptr;
+        iov_[1].iov_len = 0;
+    }
+
     LOG_DEBUG("Client[%d] response filesize:%d, %d  to %d", fd_, response_.FileLen(), iovCnt_, ToWriteBytes());
     return true;
 }

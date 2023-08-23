@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", function () {
      uploadForm.addEventListener("submit", async function (e) {
           e.preventDefault();
           if (!fileInput.files[0]) {
-               alert("Please select a file before uploading.");
+               alert("请先选择文件！");
                return;
           }
 
@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
           // Check if the selected filename already exists
           if (checkIfFileExists(selectedFilename)) {
-               alert("File with the same name already exists. Please choose a different name.");
+               alert("同名文件已存在，请重新选择文件！");
                return;
           }
 
@@ -44,12 +44,18 @@ document.addEventListener("DOMContentLoaded", function () {
                     }
                     const listItem = document.createElement("li");
                     listItem.innerHTML = `
-                        <span class="file-name">${fileInfo.fileName}</span>
-                        <span class="file-size">${formatFileSize(fileInfo.fileSize)}</span>
-                        <span class="upload-date">${formatDateTime(fileInfo.uploadDate)}</span>
-                        <button class="btn btn-link btn-delete" data-file="${fileInfo.fileName}">删除</button>
-                        <a class="btn btn-link btn-download" href="/download?file=${fileInfo.fileName}" target="_blank">下载</a>
-                   `;
+                    <li class="file-item">
+                         <div class="file-name">${truncateFileName(fileInfo.fileName, 60)}</div>
+                         <div class="file-details">
+                              <span class="file-size">${formatFileSize(fileInfo.fileSize)}</span>
+                              <span class="upload-date">${formatDateTime(fileInfo.uploadDate)}</span>
+                         </div>
+                         <div class="file-actions">
+                              <button class="btn btn-link btn-delete" data-file="${fileInfo.fileName}">删除</button>
+                              <a class="btn btn-link btn-download" href="/download?file=${fileInfo.fileName}" target="_blank">下载</a>
+                         </div>
+                    </li>
+                    `;
                     fileListUl.appendChild(listItem);
                     fileInput.value = ""; // Clear the file input
                } else {
@@ -67,7 +73,7 @@ document.addEventListener("DOMContentLoaded", function () {
                const fileName = e.target.getAttribute("data-file");
 
                // Show a confirmation dialog before proceeding
-               const confirmed = confirm(`Are you sure you want to delete "${fileName}"?`);
+               const confirmed = confirm(`确定需要删除文件"${fileName}"?`);
                if (!confirmed) {
                     return;
                }
@@ -85,7 +91,7 @@ document.addEventListener("DOMContentLoaded", function () {
                          const responseData = await response.json();
                          if (responseData.err === 0) {
                               // Handle success
-                              e.target.parentElement.remove();
+                              e.target.parentElement.parentElement.remove();
                          } else {
                               console.error("err:", responseData.err);
 
@@ -112,12 +118,18 @@ document.addEventListener("DOMContentLoaded", function () {
                               const { fileName, fileSize, uploadDate } = fileInfo;
                               const listItem = document.createElement("li");
                               listItem.innerHTML = `
-                                 <span class="file-name">${fileName}</span>
-                                 <span class="file-size">${formatFileSize(fileSize)}</span>
-                                 <span class="upload-date">${formatDateTime(uploadDate)}</span>
-                                 <button class="btn btn-link btn-delete" data-file="${fileName}">删除</button>
-                                 <a class="btn btn-link btn-download" href="/download?file=${fileName}" target="_blank">下载</a>
-                             `;
+                              <li class="file-item">
+                                   <div class="file-name">${truncateFileName(fileName, 60)}</div>
+                                   <div class="file-details">
+                                        <span class="file-size">${formatFileSize(fileSize)}</span>
+                                        <span class="upload-date">${formatDateTime(uploadDate)}</span>
+                                   </div>
+                                   <div class="file-actions">
+                                        <button class="btn btn-link btn-delete" data-file="${fileName}">删除</button>
+                                        <a class="btn btn-link btn-download" href="/download?file=${fileName}" target="_blank">下载</a>
+                                   </div>
+                              </li>
+                              `;
                               fileListUl.appendChild(listItem);
                          });
                     }
@@ -168,6 +180,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
           return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
      }
+
+     // Format file name if it's too long
+     function truncateFileName(name, maxLength) {
+          if (name.length > maxLength) {
+               return name.substr(0, maxLength - 3) + '...';
+          }
+          return name;
+     }
+
 
 
      fetchFileList();

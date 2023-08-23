@@ -488,25 +488,34 @@ a:hover, a:active, a:focus {
   padding: 0;
 }
 
-.file-list li {
-  display: inline-block;
-  padding: 10px 0;
-  border-bottom: 1px solid #ccc;
+.file-item {
+  display: grid;
+  grid-template-columns: auto 1fr 0fr 0fr; /* Adjust the column ratios as needed */
+  gap: 10px;
+  border: 1px solid #ccc;
+  padding: 10px;
+  align-items: center; /* Align items vertically */
 }
 
-.file-list .file-name {
-  flex: 1;
-  margin-right: 10px;
+.file-name {
+  flex: 0 0 auto; /* Fix the size of the file-name */
+  white-space: nowrap; /* Prevent text from wrapping */
+  overflow: hidden; /* Hide overflowing text */
+  text-overflow: ellipsis; /* Show ellipsis (...) for truncated text */
 }
 
-.file-list .file-size,
-.file-list .upload-date {
-  text-align: center;
+.file-details {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
 }
 
-.file-list .btn-delete,
-.file-list .btn-download {
-  text-align: center;
+.file-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px; /* Adjust the gap between buttons */
 }
 
 

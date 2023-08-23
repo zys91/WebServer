@@ -166,13 +166,14 @@ void WebServer::SendError_(int fd, const char *info)
     close(fd);
 }
 
-// CloseConn_为timer超时的回调函数
+// CloseConn_为timer超时的回调函数，无论主动关闭还是超时关闭，都需要调用CloseConn_函数
 void WebServer::CloseConn_(HttpConn *client)
 {
     assert(client);
     LOG_INFO("Timeout -> Client[%d] quit!", client->GetFd());
     epoller_->DelFd(client->GetFd());
     client->Close();
+    users_.erase(client->GetFd());
 }
 
 // 主动关闭连接，并从timer中删除

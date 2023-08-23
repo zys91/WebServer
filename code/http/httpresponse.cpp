@@ -52,30 +52,31 @@ const unordered_map<int, string> HttpResponse::CODE_PATH = {
 HttpResponse::HttpResponse()
 {
     code_ = -1;
+    isKeepAlive_ = false;
     reqType_ = -1;
     reqRes_ = "";
-    isKeepAlive_ = false;
-    mmFile_ = nullptr;
-    mmFileStat_ = {0};
+    FileFd_ = -1;
+    FilePtr_ = nullptr;
+    FileStat_ = {0};
 };
 
 HttpResponse::~HttpResponse()
 {
     UnmapFile();
+    CloseFile();
 }
 
 void HttpResponse::Init(int reqType, string &reqRes, bool isKeepAlive, int code)
 {
-    if (mmFile_)
-    {
-        UnmapFile();
-    }
+    UnmapFile();
+    CloseFile();
     code_ = code;
     isKeepAlive_ = isKeepAlive;
     reqType_ = reqType;
     reqRes_ = reqRes;
-    mmFile_ = nullptr;
-    mmFileStat_ = {0};
+    FileFd_ = -1;
+    FilePtr_ = nullptr;
+    FileStat_ = {0};
 }
 
 void HttpResponse::MakeResponse(Buffer &buff)
@@ -84,11 +85,11 @@ void HttpResponse::MakeResponse(Buffer &buff)
     if (reqType_ == HttpRequest::GET_HTML || reqType_ == HttpRequest::GET_FILE)
     {
         /* 判断请求的资源文件 */
-        if (reqRes_.empty() || stat((reqRes_).data(), &mmFileStat_) < 0 || S_ISDIR(mmFileStat_.st_mode))
+        if (reqRes_.empty() || stat((reqRes_).data(), &FileStat_) < 0 || S_ISDIR(FileStat_.st_mode))
         {
             code_ = 404;
         }
-        else if (!(mmFileStat_.st_mode & S_IROTH))
+        else if (!(FileStat_.st_mode & S_IROTH))
         {
             code_ = 403;
         }
@@ -108,14 +109,32 @@ void HttpResponse::MakeResponse(Buffer &buff)
     AddContent_(buff);
 }
 
-char *HttpResponse::File()
+HttpResponse::TransMethod HttpResponse::FileTransMethod()
 {
-    return mmFile_;
+    if (reqType_ == HttpRequest::GET_HTML)
+    {
+        return MMAP;
+    }
+    else if (reqType_ == HttpRequest::GET_FILE)
+    {
+        return SENDFILE;
+    }
+    return NONE;
+}
+
+int HttpResponse::FileFd()
+{
+    return FileFd_;
+}
+
+char *HttpResponse::FilePtr()
+{
+    return FilePtr_;
 }
 
 size_t HttpResponse::FileLen() const
 {
-    return mmFileStat_.st_size;
+    return FileStat_.st_size;
 }
 
 void HttpResponse::ErrorHtml_()
@@ -123,7 +142,7 @@ void HttpResponse::ErrorHtml_()
     if (CODE_PATH.count(code_))
     {
         reqRes_ = CODE_PATH.find(code_)->second;
-        stat((reqRes_).data(), &mmFileStat_);
+        stat((reqRes_).data(), &FileStat_);
     }
 }
 
@@ -174,8 +193,9 @@ void HttpResponse::AddHeader_(Buffer &buff)
 
 void HttpResponse::AddContent_(Buffer &buff)
 {
-    if (reqType_ == HttpRequest::GET_HTML || reqType_ == HttpRequest::GET_FILE)
+    if (reqType_ == HttpRequest::GET_HTML)
     {
+        // using mmap
         int srcFd = open((reqRes_).data(), O_RDONLY);
         if (srcFd < 0)
         {
@@ -186,15 +206,28 @@ void HttpResponse::AddContent_(Buffer &buff)
         /* 将文件映射到内存提高文件的访问速度
             MAP_PRIVATE 建立一个写入时拷贝的私有映射*/
         LOG_DEBUG("file path %s", (reqRes_).data());
-        int *mmRet = (int *)mmap(0, mmFileStat_.st_size, PROT_READ, MAP_PRIVATE, srcFd, 0);
+        int *mmRet = (int *)mmap(0, FileStat_.st_size, PROT_READ, MAP_PRIVATE, srcFd, 0);
         if (*mmRet == -1)
         {
             ErrorContent(buff, "File Not Found!");
             return;
         }
-        mmFile_ = (char *)mmRet;
+        FilePtr_ = (char *)mmRet;
         close(srcFd);
-        buff.Append("Content-Length: " + to_string(mmFileStat_.st_size) + "\r\n\r\n");
+        buff.Append("Content-Length: " + to_string(FileStat_.st_size) + "\r\n\r\n");
+    }
+    else if (reqType_ == HttpRequest::GET_FILE)
+    {
+        // using sendfile
+        int fileFd = open((reqRes_).data(), O_RDONLY);
+        if (fileFd < 0)
+        {
+            ErrorContent(buff, "File Not Found!");
+            return;
+        }
+        stat((reqRes_).data(), &FileStat_);
+        FileFd_ = fileFd;
+        buff.Append("Content-Length: " + to_string(FileStat_.st_size) + "\r\n\r\n");
     }
     else if (reqType_ == HttpRequest::GET_INFO)
     {
@@ -205,10 +238,19 @@ void HttpResponse::AddContent_(Buffer &buff)
 
 void HttpResponse::UnmapFile()
 {
-    if (mmFile_)
+    if (FilePtr_)
     {
-        munmap(mmFile_, mmFileStat_.st_size);
-        mmFile_ = nullptr;
+        munmap(FilePtr_, FileStat_.st_size);
+        FilePtr_ = nullptr;
+    }
+}
+
+void HttpResponse::CloseFile()
+{
+    if (FileFd_ != -1)
+    {
+        close(FileFd_);
+        FileFd_ = -1;
     }
 }
 

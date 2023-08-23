@@ -5,7 +5,6 @@
  */
 #include "buffer.h"
 
-#include <iostream>
 #include <assert.h>
 #include <cstring>   // bzero
 #include <unistd.h>  // write

@@ -18,10 +18,21 @@ public:
     HttpResponse();
     ~HttpResponse();
 
+    enum TransMethod
+    {
+        NONE = 0,
+        MMAP,
+        SENDFILE,
+    };
+
     void Init(int reqType, std::string &reqRes, bool isKeepAlive = false, int code = -1);
     void MakeResponse(Buffer &buff);
     void UnmapFile();
-    char *File();
+    void CloseFile();
+
+    char *FilePtr();
+    int FileFd();
+    TransMethod FileTransMethod();
     size_t FileLen() const;
     void ErrorContent(Buffer &buff, std::string message);
     int Code() const { return code_; }
@@ -40,8 +51,9 @@ private:
     int reqType_;
     std::string reqRes_;
 
-    char *mmFile_;
-    struct stat mmFileStat_;
+    char *FilePtr_; // mmap
+    int FileFd_;    // sendfile
+    struct stat FileStat_;
 
     static const std::unordered_map<std::string, std::string> SUFFIX_TYPE;
     static const std::unordered_map<int, std::string> CODE_STATUS;

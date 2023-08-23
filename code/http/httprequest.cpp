@@ -79,7 +79,7 @@ HttpRequest::HTTP_CODE HttpRequest::parse(Buffer &buff)
     while (buff.ReadableBytes() && state_ != FINISH)
     {
         const char *lineEnd;
-        if (state_ == BODY)
+        if (state_ == BODY)// TODO: 支持流式分批处理BODY数据，尤其是大文件上传业务
         {
             lineEnd = buff.BeginWriteConst();
             /*判断post数据是否接受完整，未接收完则退出循环，表示继续请求*/
@@ -219,7 +219,7 @@ void HttpRequest::ParseGet_()
         LOG_DEBUG("Tag:%d", tag);
         if (tag == 1) // fileslist
         {
-            GetFileList(dataDir_, reqRes); // +user
+            GetFileList(dataDir_, reqRes); // TODO: 支持多用户目录
             reqType_ = GET_INFO;
             reqRes_ = reqRes.dump();
             return;
@@ -227,7 +227,7 @@ void HttpRequest::ParseGet_()
         else if (tag == 3 && queryRes_.count("file")) // download?file=${fileName}
         {
             reqType_ = GET_FILE;
-            reqRes_ = dataDir_ + "/" + queryRes_["file"]; // +user
+            reqRes_ = dataDir_ + "/" + queryRes_["file"]; // TODO: 支持多用户目录
             return;
         }
     }
@@ -292,7 +292,7 @@ void HttpRequest::ParsePost_()
                 int err = 0;
                 nlohmann::json reqRes;
                 string Filename = jsonRes["file"];
-                if (!DeleteFile(dataDir_ + "/" + Filename)) // +user
+                if (!DeleteFile(dataDir_ + "/" + Filename)) // TODO: 支持多用户目录
                 {
                     err = 403;
                 }
@@ -472,16 +472,29 @@ void HttpRequest::SaveFileUpload_(const string &filename, const string &content)
     }
 
     // Define the directory where uploaded files will be stored
-    string uploadDirectory = dataDir_ + "/"; // +user
+    string uploadDirectory = dataDir_ + "/"; // TODO: 支持多用户目录
 
     // Create the full path for the uploaded file
     string fullPath = uploadDirectory + filename;
+    size_t fileSize = content.size();
+    if (fileSize > 0)
+    {
+        LOG_DEBUG("File upload: %s, size: %lu", fullPath.c_str(), fileSize);
+    }
+    else // 禁止空文件上传
+    {
+        LOG_ERROR("Empty file upload: %s", fullPath.c_str());
+        reqRes["err"] = 400;
+        reqType_ = GET_INFO;
+        reqRes_ = reqRes.dump();
+        return;
+    }
 
     // Save the uploaded file content to the specified location
     ofstream file(fullPath, ios::out | ios::app | ios::binary);
     if (file.is_open())
     {
-        file.write(content.c_str(), content.size());
+        file.write(content.c_str(), fileSize);
         file.close();
         LOG_DEBUG("Uploaded file saved: %s", fullPath.c_str());
         struct stat fileStat;
@@ -489,7 +502,7 @@ void HttpRequest::SaveFileUpload_(const string &filename, const string &content)
         {
             reqRes["err"] = 0;
             reqRes["fileName"] = filename;
-            reqRes["fileSize"] = content.size();
+            reqRes["fileSize"] = fileSize;
             reqRes["uploadDate"] = static_cast<unsigned long long>(fileStat.st_mtime);
         }
         else
