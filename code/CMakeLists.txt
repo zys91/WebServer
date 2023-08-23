@@ -16,4 +16,4 @@ target_include_directories(server PRIVATE
 )
 
 # 链接相关库到server中
-target_link_libraries(server pthread mysqlclient)
+target_link_libraries(server pthread mysqlclient hiredis)

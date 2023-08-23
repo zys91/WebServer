@@ -12,8 +12,8 @@
 #include <mysql/mysql.h> //mysql
 
 #include "log/log.h"
-#include "pool/sqlconnpool.h"
-#include "pool/sqlconnRAII.h"
+#include "pool/connpool.h"
+#include "pool/connRAII.h"
 
 using namespace std;
 
@@ -79,7 +79,7 @@ HttpRequest::HTTP_CODE HttpRequest::parse(Buffer &buff)
     while (buff.ReadableBytes() && state_ != FINISH)
     {
         const char *lineEnd;
-        if (state_ == BODY)// TODO: 支持流式分批处理BODY数据，尤其是大文件上传业务
+        if (state_ == BODY) // TODO: 支持流式分批处理BODY数据，尤其是大文件上传业务
         {
             lineEnd = buff.BeginWriteConst();
             /*判断post数据是否接受完整，未接收完则退出循环，表示继续请求*/
@@ -625,7 +625,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     }
     LOG_INFO("Verify name:%s pwd:%s", name.c_str(), pwd.c_str());
     MYSQL *sql;
-    SqlConnRAII sqlRAII(&sql, SqlConnPool::Instance());
+    ConnRAII<MYSQL> sqlRAII(&sql, MySQLConnPool::Instance());
     assert(sql);
 
     bool flag = false;
@@ -686,7 +686,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
         }
         flag = true;
     }
-    SqlConnPool::Instance()->FreeConn(sql);
+
     LOG_DEBUG("UserVerify success!");
     return flag;
 }

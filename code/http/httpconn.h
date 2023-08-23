@@ -23,7 +23,7 @@ public:
 
     ~HttpConn();
 
-    void init(int sockFd, const sockaddr_storage &addr);
+    void Init(int sockFd, const sockaddr_storage &addr);
 
     ssize_t read(int *saveErrno);
 

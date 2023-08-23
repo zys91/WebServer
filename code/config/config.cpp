@@ -19,7 +19,7 @@ Config::Config()
     sr_optLinger = true;  // 优雅退出
     sr_optIPv6 = true;    // 双栈支持
     sr_connPoolNum = 12;  // 连接池数量
-    sr_threadNum = 6;     // 线程池数量
+    sr_threadNum = 8;     // 线程池数量
     sr_enableLog = true;  // 日志开关
     sr_logLevel = 1;      // 日志等级
     sr_logQueSize = 1024; // 日志异步队列容量

@@ -14,7 +14,7 @@
 class Log
 {
 public:
-    void init(int level, const char *path = "./log",
+    void Init(int level, const char *path = "./log",
               const char *suffix = ".log",
               int maxQueueCapacity = 1024);
 

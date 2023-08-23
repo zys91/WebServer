@@ -14,8 +14,8 @@
 #include <sys/socket.h>
 
 #include "log/log.h"
-#include "pool/sqlconnpool.h"
-#include "pool/sqlconnRAII.h"
+#include "pool/connpool.h"
+#include "pool/connRAII.h"
 
 using namespace std;
 
@@ -23,15 +23,25 @@ bool WebServer::isClose_ = false;
 
 WebServer::WebServer(
     int port, int trigMode, int timeoutMS, bool OptLinger, bool OptIPv6,
-    const char *sqlAddr, int sqlPort, const char *sqlUser, const char *sqlPwd,
-    const char *dbName, int connPoolNum, int threadNum,
+    const char *mysqlAddr, int mysqlPort, const char *mysqlUser, const char *mysqlPwd, const char *mysqlDBName,
+    const char *redisAddr, int redisPort, const char *redisUser, const char *redisPwd, const char *redisDBName,
+    int connPoolNum, int threadNum,
     bool enableLog, int logLevel, int logQueSize) : port_(port), enableLinger_(OptLinger), enableIPv6_(OptIPv6), timeoutMS_(timeoutMS),
                                                     timer_(new HeapTimer()), threadpool_(new ThreadPool(threadNum)), epoller_(new Epoller())
 {
     HttpConn::resDir = "./resources";
     HttpConn::dataDir = "./data";
     HttpConn::userCount = 0;
-    SqlConnPool::Instance()->Init(sqlAddr, sqlPort, sqlUser, sqlPwd, dbName, connPoolNum);
+
+    if (!MySQLConnPool::Instance()->InitPool(mysqlAddr, mysqlPort, mysqlUser, mysqlPwd, mysqlDBName, connPoolNum))
+    {
+        isClose_ = true;
+    }
+
+    if (!RedisConnPool::Instance()->InitPool(redisAddr, redisPort, redisUser, redisPwd, redisDBName, connPoolNum))
+    {
+        isClose_ = true;
+    }
 
     InitEventMode_(trigMode);
     if (!InitSocket_())
@@ -41,21 +51,21 @@ WebServer::WebServer(
 
     if (enableLog)
     {
-        Log::Instance()->init(logLevel, "./log", ".log", logQueSize);
+        Log::Instance()->Init(logLevel, "./log", ".log", logQueSize);
         if (isClose_)
         {
-            LOG_ERROR("========== Server init error!==========");
+            LOG_ERROR("========== Server Init error!==========");
         }
         else
         {
-            LOG_INFO("========== Server init ==========");
+            LOG_INFO("========== Server Init ==========");
             LOG_INFO("Port:%d, EnableLinger: %s EnableIpv6: %s", port_, OptLinger ? "true" : "false", OptIPv6 ? "true" : "false");
             LOG_INFO("Listen Mode: %s, Connect Mode: %s",
                      (listenEvent_ & EPOLLET ? "ET" : "LT"),
                      (connEvent_ & EPOLLET ? "ET" : "LT"));
             LOG_INFO("LogSys level: %d", logLevel);
             LOG_INFO("resDir: %s, dataDir: %s", HttpConn::resDir.c_str(), HttpConn::dataDir.c_str());
-            LOG_INFO("SqlConnPool num: %d, ThreadPool num: %d", connPoolNum, threadNum);
+            LOG_INFO("ConnPool num: %d, ThreadPool num: %d", connPoolNum, threadNum);
         }
     }
 }
@@ -69,7 +79,8 @@ WebServer::~WebServer()
         close(listenFdv6_);
     }
     isClose_ = true;
-    SqlConnPool::Instance()->ClosePool();
+    MySQLConnPool::Instance()->ClosePool();
+    RedisConnPool::Instance()->ClosePool();
 }
 
 /*
@@ -187,7 +198,7 @@ void WebServer::EndConn_(HttpConn *client)
 void WebServer::AddClient_(int fd, sockaddr_storage addr)
 {
     assert(fd > 0);
-    users_[fd].init(fd, addr);
+    users_[fd].Init(fd, addr);
     if (timeoutMS_ > 0)
     {
         timer_->add(fd, timeoutMS_, bind(&WebServer::CloseConn_, this, &users_[fd]));

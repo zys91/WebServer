@@ -19,8 +19,9 @@ class WebServer
 public:
     WebServer(
         int port, int trigMode, int timeoutMS, bool OptLinger, bool OptIPv6,
-        const char *sqlAddr, int sqlPort, const char *sqlUser, const char *sqlPwd,
-        const char *dbName, int connPoolNum, int threadNum,
+        const char *mysqlAddr, int mysqlPort, const char *mysqlUser, const char *mysqlPwd, const char *mysqlDBName,
+        const char *redisAddr, int redisPort, const char *redisUser, const char *redisPwd, const char *redisDBName,
+        int connPoolNum, int threadNum,
         bool enableLog, int logLevel, int logQueSize);
 
     ~WebServer();

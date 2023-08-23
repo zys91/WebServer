@@ -12,7 +12,7 @@
 #include <sys/sendfile.h> // sendfile
 
 #include "log/log.h"
-#include "pool/sqlconnRAII.h"
+#include "pool/connRAII.h"
 
 using namespace std;
 
@@ -33,7 +33,7 @@ HttpConn::~HttpConn()
     Close();
 };
 
-void HttpConn::init(int fd, const sockaddr_storage &addr)
+void HttpConn::Init(int fd, const sockaddr_storage &addr)
 {
     assert(fd > 0);
     userCount++;

@@ -1,6 +1,9 @@
 # WebServer
 用C++实现的高性能WEB服务器，经过webbenchh压力测试可以实现上万的QPS
 
+## 说明
+* 基于原作者项目二次开发，修复若干BUG，添加新功能。
+
 ## 功能
 * 利用IO复用技术Epoll与线程池实现多线程的Reactor高并发模型；
 * 利用正则与状态机解析HTTP请求报文，实现处理静态资源的请求；
@@ -13,8 +16,8 @@
 ## 环境要求
 * Linux
 * C++14
-* MySql
-
+* MySql [apt install mysql-server libmysqlclient-dev]
+* Redis [apt install redis-server libhiredis-dev]
 
 ## 项目启动
 需要先配置好对应的数据库
@@ -47,13 +50,8 @@ make
 
 ## 压力测试
 ```bash
-./webbench-1.5/webbench -c 100 -t 10 http://ip:port/
-./webbench-1.5/webbench -c 1000 -t 10 http://ip:port/
-./webbench-1.5/webbench -c 5000 -t 10 http://ip:port/
 ./webbench-1.5/webbench -c 10000 -t 10 http://ip:port/
 ```
-* 测试环境: Ubuntu:19.10 cpu:i5-8400 内存:8G 
-* QPS 10000+
 
 ## TODO
 * 完善单元测试
@@ -63,3 +61,4 @@ make
 Linux高性能服务器编程，游双著.
 
 [@qinguoyi](https://github.com/qinguoyi/TinyWebServer)
+[@markparticle](markparticle/WebServer)
