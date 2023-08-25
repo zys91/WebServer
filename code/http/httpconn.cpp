@@ -180,21 +180,25 @@ bool HttpConn::process()
         return false;
     }
 
-    LOG_DEBUG("Client[%d] process...", fd_);
     HttpRequest::HTTP_CODE processStatus = request_.parse(readBuff_);
     if (processStatus == HttpRequest::GET_REQUEST)
     {
-        LOG_DEBUG("req:[%d]%s", request_.reqType(), request_.reqRes().c_str());
-        response_.Init(request_.reqType(), request_.reqRes(), request_.IsKeepAlive(), 200);
+        LOG_DEBUG("Client[%d] req:[%d]%s auth:[%d]%s", fd_, request_.reqType(), request_.reqRes().c_str(), request_.authState(), request_.authInfo().c_str());
+        response_.Init(request_.reqType(), request_.reqRes(), request_.authState(), request_.authInfo(), resDir, request_.IsKeepAlive(), 200);
+    }
+    else if (processStatus == HttpRequest::FORBIDDENT_REQUEST)
+    {
+        LOG_DEBUG("Client[%d] req:forbidden auth:fail", fd_);
+        response_.Init(request_.reqType(), request_.reqRes(), request_.authState(), request_.authInfo(), resDir, request_.IsKeepAlive(), 403);
     }
     else if (processStatus == HttpRequest::NO_REQUEST)
     {
-        LOG_DEBUG("Client[%d] wait next...", fd_);
+        LOG_DEBUG("Client[%d] req:wait next...", fd_);
         return false;
     }
     else
     {
-        response_.Init(request_.reqType(), request_.reqRes(), false, 400);
+        response_.Init(request_.reqType(), request_.reqRes(), request_.authState(), request_.authInfo(), resDir, false, 400);
     }
 
     response_.MakeResponse(writeBuff_);

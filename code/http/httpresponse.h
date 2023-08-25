@@ -11,6 +11,7 @@
 #include <sys/stat.h> // stat
 
 #include "buffer/buffer.h"
+#include "http/httprequest.h"
 
 class HttpResponse
 {
@@ -25,14 +26,14 @@ public:
         SENDFILE,
     };
 
-    void Init(int reqType, std::string &reqRes, bool isKeepAlive = false, int code = -1);
+    void Init(HttpRequest::REQ_TYPE reqType, std::string &reqRes, HttpRequest::AUTH_STATE authState, std::string &authInfo, std::string &resDir, bool isKeepAlive = false, int code = -1);
     void MakeResponse(Buffer &buff);
     void UnmapFile();
     void CloseFile();
 
     char *FilePtr();
     int FileFd();
-    TransMethod FileTransMethod();
+    TransMethod FileTransMethod() const;
     size_t FileLen() const;
     void ErrorContent(Buffer &buff, std::string message);
     int Code() const { return code_; }
@@ -47,10 +48,14 @@ private:
 
     int code_;
     bool isKeepAlive_;
+    std::string resDir_;
 
-    int reqType_;
+    HttpRequest::REQ_TYPE reqType_;
     std::string reqRes_;
+    HttpRequest::AUTH_STATE authState_;
+    std::string authInfo_;
 
+    TransMethod transMethod_;
     char *FilePtr_; // mmap
     int FileFd_;    // sendfile
     struct stat FileStat_;

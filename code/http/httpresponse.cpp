@@ -10,7 +10,6 @@
 #include <sys/mman.h> // mmap, munmap
 
 #include "log/log.h"
-#include "http/httprequest.h"
 
 using namespace std;
 
@@ -53,8 +52,11 @@ HttpResponse::HttpResponse()
 {
     code_ = -1;
     isKeepAlive_ = false;
-    reqType_ = -1;
+    reqType_ = HttpRequest::GET_HTML;
     reqRes_ = "";
+    authState_ = HttpRequest::AUTH_NONE;
+    authInfo_ = "";
+    transMethod_ = NONE;
     FileFd_ = -1;
     FilePtr_ = nullptr;
     FileStat_ = {0};
@@ -66,14 +68,18 @@ HttpResponse::~HttpResponse()
     CloseFile();
 }
 
-void HttpResponse::Init(int reqType, string &reqRes, bool isKeepAlive, int code)
+void HttpResponse::Init(HttpRequest::REQ_TYPE reqType, string &reqRes, HttpRequest::AUTH_STATE authState, string &authInfo, string &resDir, bool isKeepAlive, int code)
 {
     UnmapFile();
     CloseFile();
     code_ = code;
     isKeepAlive_ = isKeepAlive;
+    resDir_ = resDir;
     reqType_ = reqType;
     reqRes_ = reqRes;
+    authState_ = authState;
+    authInfo_ = authInfo;
+    transMethod_ = NONE;
     FileFd_ = -1;
     FilePtr_ = nullptr;
     FileStat_ = {0};
@@ -81,26 +87,21 @@ void HttpResponse::Init(int reqType, string &reqRes, bool isKeepAlive, int code)
 
 void HttpResponse::MakeResponse(Buffer &buff)
 {
-    // 判断请求的资源类型
-    if (reqType_ == HttpRequest::GET_HTML || reqType_ == HttpRequest::GET_FILE)
+    if (code_ == 200)
     {
-        /* 判断请求的资源文件 */
-        if (reqRes_.empty() || stat((reqRes_).data(), &FileStat_) < 0 || S_ISDIR(FileStat_.st_mode))
+        // 判断请求的资源类型
+        if (reqType_ == HttpRequest::GET_HTML || reqType_ == HttpRequest::GET_FILE)
         {
-            code_ = 404;
+            /* 判断请求的资源文件 */
+            if (reqRes_.empty() || stat((reqRes_).data(), &FileStat_) < 0 || S_ISDIR(FileStat_.st_mode))
+            {
+                code_ = 404;
+            }
+            else if (!(FileStat_.st_mode & S_IROTH))
+            {
+                code_ = 403;
+            }
         }
-        else if (!(FileStat_.st_mode & S_IROTH))
-        {
-            code_ = 403;
-        }
-        else if (code_ == -1)
-        {
-            code_ = 200;
-        }
-    }
-    else if (reqType_ == HttpRequest::GET_INFO)
-    {
-        code_ = 200;
     }
 
     ErrorHtml_();
@@ -109,17 +110,9 @@ void HttpResponse::MakeResponse(Buffer &buff)
     AddContent_(buff);
 }
 
-HttpResponse::TransMethod HttpResponse::FileTransMethod()
+HttpResponse::TransMethod HttpResponse::FileTransMethod() const
 {
-    if (reqType_ == HttpRequest::GET_HTML)
-    {
-        return MMAP;
-    }
-    else if (reqType_ == HttpRequest::GET_FILE)
-    {
-        return SENDFILE;
-    }
-    return NONE;
+    return transMethod_;
 }
 
 int HttpResponse::FileFd()
@@ -141,7 +134,7 @@ void HttpResponse::ErrorHtml_()
 {
     if (CODE_PATH.count(code_))
     {
-        reqRes_ = CODE_PATH.find(code_)->second;
+        reqRes_ = resDir_ + CODE_PATH.find(code_)->second;
         stat((reqRes_).data(), &FileStat_);
     }
 }
@@ -174,6 +167,11 @@ void HttpResponse::AddHeader_(Buffer &buff)
         buff.Append("close\r\n");
     }
 
+    if (authState_ == HttpRequest::AUTH_SET)
+    {
+        buff.Append("Set-Cookie: " + authInfo_ + "\r\n");
+    }
+
     if (reqType_ == HttpRequest::GET_HTML)
     {
         buff.Append("Content-Type: " + GetFileType_() + "\r\n");
@@ -196,6 +194,7 @@ void HttpResponse::AddContent_(Buffer &buff)
     if (reqType_ == HttpRequest::GET_HTML)
     {
         // using mmap
+        transMethod_ = MMAP;
         int srcFd = open((reqRes_).data(), O_RDONLY);
         if (srcFd < 0)
         {
@@ -219,18 +218,19 @@ void HttpResponse::AddContent_(Buffer &buff)
     else if (reqType_ == HttpRequest::GET_FILE)
     {
         // using sendfile
-        int fileFd = open((reqRes_).data(), O_RDONLY);
-        if (fileFd < 0)
+        transMethod_ = SENDFILE;
+        int srcFd = open((reqRes_).data(), O_RDONLY);
+        if (srcFd < 0)
         {
             ErrorContent(buff, "File Not Found!");
             return;
         }
-        stat((reqRes_).data(), &FileStat_);
-        FileFd_ = fileFd;
+        FileFd_ = srcFd;
         buff.Append("Content-Length: " + to_string(FileStat_.st_size) + "\r\n\r\n");
     }
     else if (reqType_ == HttpRequest::GET_INFO)
     {
+        transMethod_ = NONE;
         buff.Append("Content-Length: " + to_string(reqRes_.size()) + "\r\n\r\n");
         buff.Append(reqRes_);
     }

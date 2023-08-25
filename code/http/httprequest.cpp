@@ -6,6 +6,7 @@
 #include "httprequest.h"
 
 #include <fstream>
+#include <random>
 #include <regex>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -19,23 +20,27 @@ using namespace std;
 
 const unordered_set<string> HttpRequest::DEFAULT_HTML{
     "/index",
-    "/register",
-    "/login",
-    "/welcome",
-    "/video",
     "/picture",
+    "/video",
+    "/file",
+    "/user",
 };
 
 const unordered_map<string, int> HttpRequest::DEFAULT_HTML_TAG{
-    {"/register.html", 0},
-    {"/login.html", 1},
+    {"/file.html", 0},
+    {"/user.html", 1},
 };
 
+// 需与下面处理业务逻辑的TAG对应
 const unordered_map<string, int> HttpRequest::SPECIAL_PATH_TAG{
-    {"/upload", 0},    // post
-    {"/fileslist", 1}, // get
-    {"/delete", 2},    // post
-    {"/download", 3},  // get
+    {"/fileslist", 0}, // get
+    {"/upload", 1},    // post
+    {"/download", 2},  // get
+    {"/delete", 3},    // post
+    {"/register", 4},  // post
+    {"/login", 5},     // post
+    {"/userinfo", 6},  // get
+    {"/logout", 7},    // get
 };
 
 HttpRequest::HttpRequest()
@@ -43,7 +48,10 @@ HttpRequest::HttpRequest()
     method_ = url_ = path_ = query_ = version_ = body_ = "";
     state_ = REQUEST_LINE;
     reqType_ = GET_HTML;
-    reqRes_ = path_;
+    reqRes_ = "";
+    authState_ = AUTH_NONE;
+    authInfo_ = "";
+    userInfo_ = "";
 }
 
 void HttpRequest::Init(const string &resDir, const string &dataDir)
@@ -51,10 +59,14 @@ void HttpRequest::Init(const string &resDir, const string &dataDir)
     method_ = url_ = path_ = query_ = version_ = body_ = "";
     state_ = REQUEST_LINE;
     reqType_ = GET_HTML;
-    reqRes_ = path_;
+    reqRes_ = "";
+    authState_ = AUTH_NONE;
+    authInfo_ = "";
+    userInfo_ = "";
     resDir_ = resDir;
     dataDir_ = dataDir;
     header_.clear();
+    cookies_.clear();
     queryRes_.clear();
     bodyRes_.clear();
 }
@@ -116,20 +128,31 @@ HttpRequest::HTTP_CODE HttpRequest::parse(Buffer &buff)
                 ParseGet_();
                 state_ = FINISH;
                 buff.RetrieveAll();
+                if (authState_ == AUTH_FAIL)
+                {
+                    return FORBIDDENT_REQUEST;
+                }
                 return GET_REQUEST;
             } // POST请求且解析到空行，且Content-Length为0，则解析完成，即BODY无数据
             else if (state_ == BODY && method_ == "POST" && header_["Content-Length"] == "0")
             {
-                body_ = "";
-                ParsePost_();
-                state_ = FINISH;
+                line = "";
+                ParseBody_(line);
                 buff.RetrieveAll();
+                if (authState_ == AUTH_FAIL)
+                {
+                    return FORBIDDENT_REQUEST;
+                }
                 return GET_REQUEST;
             }
             break;
         case BODY:
             ParseBody_(line);
             buff.RetrieveAll();
+            if (authState_ == AUTH_FAIL)
+            {
+                return FORBIDDENT_REQUEST;
+            }
             return GET_REQUEST;
             break;
         default:
@@ -203,6 +226,10 @@ void HttpRequest::ParseHeader_(const string &line)
     if (regex_match(line, subMatch, patten))
     {
         header_[subMatch[1]] = subMatch[2];
+        if (subMatch[1] == "Cookie")
+        {
+            ParseCookies_(subMatch[2]);
+        }
     }
     else
     {
@@ -210,27 +237,113 @@ void HttpRequest::ParseHeader_(const string &line)
     }
 }
 
+void HttpRequest::ParseCookies_(const string &cookieString)
+{
+    regex cookiePattern("([^;=]+)=([^;]*)");
+    smatch cookieMatch;
+
+    auto cookieIter = sregex_iterator(cookieString.begin(), cookieString.end(), cookiePattern);
+    auto cookieEnd = sregex_iterator();
+
+    for (; cookieIter != cookieEnd; ++cookieIter)
+    {
+        string key = (*cookieIter)[1];
+        string value = (*cookieIter)[2];
+        // Trim leading and trailing spaces
+        key.erase(0, key.find_first_not_of(" "));
+        key.erase(key.find_last_not_of(" ") + 1);
+        value.erase(0, value.find_first_not_of(" "));
+        value.erase(value.find_last_not_of(" ") + 1);
+        cookies_[key] = value;
+    }
+    CheckCookie_();
+}
+
+void HttpRequest::CheckCookie_()
+{
+    if (cookies_.count("session_id") && UserVerify(cookies_["session_id"], userInfo_))
+        authState_ = AUTH_PASS;
+}
+
 void HttpRequest::ParseGet_()
 {
-    nlohmann::json reqRes;
     if (SPECIAL_PATH_TAG.count(path_))
     {
+        nlohmann::json reqRes;
         int tag = SPECIAL_PATH_TAG.find(path_)->second;
         LOG_DEBUG("Tag:%d", tag);
-        if (tag == 1) // fileslist
+
+        if (authState_ != AUTH_PASS)
         {
-            GetFileList(dataDir_, reqRes); // TODO: 支持多用户目录
+            authState_ = AUTH_FAIL;
+            return;
+        }
+
+        if (tag == 0) // fileslist
+        {
+            GetFileList(dataDir_ + "/" + userInfo_ + "/", reqRes);
             reqType_ = GET_INFO;
             reqRes_ = reqRes.dump();
             return;
         }
-        else if (tag == 3 && queryRes_.count("file")) // download?file=${fileName}
+        else if (tag == 2 && queryRes_.count("file")) // download?file=${fileName}
         {
             reqType_ = GET_FILE;
-            reqRes_ = dataDir_ + "/" + queryRes_["file"]; // TODO: 支持多用户目录
+            reqRes_ = dataDir_ + "/" + userInfo_ + "/" + queryRes_["file"];
+            return;
+        }
+        else if (tag == 6) // userinfo
+        {
+            reqType_ = GET_INFO;
+            reqRes["username"] = userInfo_;
+            reqRes_ = reqRes.dump();
+            return;
+        }
+        else if (tag == 7) // logout
+        {
+            if (UserQuit(cookies_["session_id"]))
+            {
+                path_ = "/user.html";
+                authState_ = AUTH_SET;
+                authInfo_ = "session_id=" + cookies_["session_id"] + "; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; HttpOnly";
+            }
+            else
+            {
+                path_ = "/error.html";
+            }
+            reqType_ = GET_HTML;
+            reqRes_ = resDir_ + path_;
             return;
         }
     }
+    else if (DEFAULT_HTML_TAG.count(path_))
+    {
+        int tag = DEFAULT_HTML_TAG.find(path_)->second;
+        LOG_DEBUG("Tag:%d", tag);
+
+        if (authState_ == AUTH_PASS)
+        {
+            if (tag == 1) // user.html
+            {
+                path_ = "/welcome.html";
+                reqType_ = GET_HTML;
+                reqRes_ = resDir_ + path_;
+                return;
+            }
+        }
+        else
+        {
+            if (tag == 0) // file.html
+            {
+                path_ = "/user.html";
+                reqType_ = GET_HTML;
+                reqRes_ = resDir_ + path_;
+                return;
+            }
+        }
+    }
+
+    // 默认GET请求
     reqType_ = GET_HTML;
     reqRes_ = resDir_ + path_;
 }
@@ -249,15 +362,21 @@ void HttpRequest::ParsePost_()
     if (method_ == "POST" && header_["Content-Type"] == "application/x-www-form-urlencoded")
     {
         ParseUrlencodedData_(body_, bodyRes_);
-        if (DEFAULT_HTML_TAG.count(path_))
+        if (SPECIAL_PATH_TAG.count(path_))
         {
-            int tag = DEFAULT_HTML_TAG.find(path_)->second;
+            int tag = SPECIAL_PATH_TAG.find(path_)->second;
             LOG_DEBUG("Tag:%d", tag);
-            if (tag == 0 || tag == 1)
+            if (tag == 4 || tag == 5) // register or login
             {
-                bool isLogin = (tag == 1);
+                bool isLogin = (tag == 5);
                 if (UserVerify(bodyRes_["username"], bodyRes_["password"], isLogin))
                 {
+                    string cookie;
+                    if (UserEnroll(bodyRes_["username"], cookie))
+                    {
+                        authState_ = AUTH_SET;
+                        authInfo_ = cookie;
+                    }
                     path_ = "/welcome.html";
                 }
                 else
@@ -287,12 +406,19 @@ void HttpRequest::ParsePost_()
         {
             int tag = SPECIAL_PATH_TAG.find(path_)->second;
             LOG_DEBUG("Tag:%d", tag);
-            if (tag == 2)
+
+            if (authState_ != AUTH_PASS)
+            {
+                authState_ = AUTH_FAIL;
+                return;
+            }
+
+            if (tag == 3) // delete
             {
                 int err = 0;
                 nlohmann::json reqRes;
                 string Filename = jsonRes["file"];
-                if (!DeleteFile(dataDir_ + "/" + Filename)) // TODO: 支持多用户目录
+                if (!DeleteFile(dataDir_ + "/" + userInfo_ + "/" + Filename))
                 {
                     err = 403;
                 }
@@ -391,17 +517,25 @@ void HttpRequest::ParseMultipartFormData_(const string &data, const string &boun
                     {
                         string paramName = dispositionParams["name"];
 
-                        if (dispositionParams.count("filename"))
+                        if (dispositionParams.count("filename")) // 文件类型
                         {
                             if (SPECIAL_PATH_TAG.count(path_))
                             {
                                 int tag = SPECIAL_PATH_TAG.find(path_)->second;
                                 LOG_DEBUG("Tag:%d", tag);
-                                if (tag == 0)
+
+                                if (authState_ != AUTH_PASS)
+                                {
+                                    authState_ = AUTH_FAIL;
+                                    return;
+                                }
+
+                                if (tag == 1) // upload
                                 {
                                     // This part contains a file upload, process it accordingly
                                     string filename = dispositionParams["filename"];
                                     SaveFileUpload_(filename, content);
+                                    return;
                                 }
                             }
                         }
@@ -472,7 +606,7 @@ void HttpRequest::SaveFileUpload_(const string &filename, const string &content)
     }
 
     // Define the directory where uploaded files will be stored
-    string uploadDirectory = dataDir_ + "/"; // TODO: 支持多用户目录
+    string uploadDirectory = dataDir_ + "/" + userInfo_ + "/";
 
     // Create the full path for the uploaded file
     string fullPath = uploadDirectory + filename;
@@ -582,8 +716,13 @@ void HttpRequest::GetFileList(const string &path, nlohmann::json &jsonObject)
     DIR *dir = opendir(path.c_str());
     if (dir == nullptr)
     {
-        LOG_ERROR("Failed to create directory: %s", path.c_str());
-        return;
+        LOG_DEBUG("Try to create directory: %s", path.c_str());
+        if (mkdir(path.c_str(), 0777) != 0)
+        {
+            LOG_ERROR("Failed to create directory: %s", path.c_str());
+            return;
+        }
+        dir = opendir(path.c_str());
     }
 
     struct dirent *entry;
@@ -629,13 +768,10 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     assert(sql);
 
     bool flag = false;
+    bool used = false;
     char order[256] = {0};
     MYSQL_RES *res = nullptr;
 
-    if (!isLogin)
-    {
-        flag = true;
-    }
     /* 查询用户及密码 */
     snprintf(order, 256, "SELECT username, password FROM user WHERE username='%s' LIMIT 1", name.c_str());
     LOG_DEBUG("%s", order);
@@ -651,11 +787,12 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     {
         LOG_DEBUG("MYSQL ROW: %s %s", row[0], row[1]);
         string password(row[1]);
-        /* 注册行为 且 用户名未被使用*/
+        /* 登录行为 */
         if (isLogin)
         {
             if (pwd == password)
             {
+                // 登录成功
                 flag = true;
             }
             else
@@ -666,14 +803,14 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
         }
         else
         {
-            flag = false;
+            used = true;
             LOG_DEBUG("user used!");
         }
     }
     mysql_free_result(res);
 
     /* 注册行为 且 用户名未被使用*/
-    if (!isLogin && flag == true)
+    if (!isLogin && !used)
     {
         LOG_DEBUG("regirster!");
         bzero(order, 256);
@@ -684,11 +821,203 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
             LOG_DEBUG("Insert error!");
             flag = false;
         }
+        // 注册成功
         flag = true;
     }
 
     LOG_DEBUG("UserVerify success!");
     return flag;
+}
+
+bool HttpRequest::UserVerify(const string &uid, string &userInfo)
+{
+    if (uid == "")
+    {
+        return false;
+    }
+    LOG_DEBUG("Verify uid:%s", uid.c_str());
+    redisContext *redis;
+    ConnRAII<redisContext> redisRAII(&redis, RedisConnPool::Instance());
+    assert(redis);
+
+    bool flag = false;
+    char order[256] = {0};
+    redisReply *reply = nullptr;
+
+    // 检查cookie是否存在并获取username
+    snprintf(order, 256, "HGET %s username", uid.c_str());
+    LOG_DEBUG("%s", order);
+    reply = (redisReply *)redisCommand(redis, order);
+    if (reply == nullptr || reply->type == REDIS_REPLY_ERROR)
+    {
+        // Handle error
+        if (reply != nullptr)
+            LOG_ERROR("Redis command error: %s", reply->str);
+        return false;
+    }
+    else if (reply->type == REDIS_REPLY_STRING)
+    {
+        // 获取到了用户信息
+        string username = reply->str;
+        userInfo = username; // 将用户名存储到 userInfo
+        flag = true;         // 用户验证成功
+    }
+    else if (reply->type == REDIS_REPLY_NIL)
+    {
+        // 用户信息不存在
+        LOG_DEBUG("User information not found in Redis");
+        flag = false; // 用户验证失败
+    }
+
+    freeReplyObject(reply);
+    return flag;
+}
+
+bool HttpRequest::UserEnroll(const string &userInfo, string &cookie)
+{
+    if (userInfo == "")
+    {
+        return false;
+    }
+    LOG_DEBUG("User enroll:%s", userInfo.c_str());
+    redisContext *redis;
+    ConnRAII<redisContext> redisRAII(&redis, RedisConnPool::Instance());
+    assert(redis);
+
+    bool used = false;
+    string uid;
+    int timeout = 60 * 60 * 24 * 1; // 1 day
+    char order[256] = {0};
+    redisReply *reply = nullptr;
+
+    do
+    {
+        // 检查uid是否存在
+        uid = GenerateRandomID();
+        snprintf(order, 256, "EXISTS %s", uid.c_str());
+        LOG_DEBUG("%s", order);
+        reply = (redisReply *)redisCommand(redis, order);
+        if (reply == nullptr || reply->type == REDIS_REPLY_ERROR)
+        {
+            // Handle error
+            if (reply != nullptr)
+                LOG_ERROR("Redis command error: %s", reply->str);
+            return false;
+        }
+        else if (reply->type == REDIS_REPLY_INTEGER)
+        {
+            if (reply->integer == 1)
+            {
+                LOG_DEBUG("uid exists!");
+                used = true;
+            }
+            else
+            {
+                used = false;
+            }
+        }
+    } while (used == true);
+
+    // 设置uid
+    snprintf(order, 256, "HSET %s username %s", uid.c_str(), userInfo.c_str());
+    LOG_DEBUG("%s", order);
+    reply = (redisReply *)redisCommand(redis, order);
+    if (reply == nullptr || reply->type == REDIS_REPLY_ERROR)
+    {
+        // Handle error
+        if (reply != nullptr)
+            LOG_ERROR("Redis command error: %s", reply->str);
+        return false;
+    }
+
+    // 设置过期时间
+    snprintf(order, 256, "EXPIRE %s %d", uid.c_str(), timeout);
+    LOG_DEBUG("%s", order);
+    reply = (redisReply *)redisCommand(redis, order);
+    if (reply == nullptr || reply->type == REDIS_REPLY_ERROR)
+    {
+        // Handle error
+        if (reply != nullptr)
+            LOG_ERROR("Redis command error: %s", reply->str);
+        return false;
+    }
+
+    freeReplyObject(reply);
+
+    // Get the current time
+    chrono::system_clock::time_point now = chrono::system_clock::now();
+
+    // Calculate the expiration time
+    chrono::duration<int> expiration_duration(timeout);
+    chrono::system_clock::time_point expiration_time = now + expiration_duration;
+
+    // Convert the expiration time to a time_t
+    time_t expiration_t = chrono::system_clock::to_time_t(expiration_time);
+
+    // Convert the expiration time to a tm struct
+    tm *expiration_tm = gmtime(&expiration_t);
+
+    // Format the expiration time as a string in the correct format
+    char expires_str[100];
+    strftime(expires_str, sizeof(expires_str), "%a, %d %b %Y %T GMT", expiration_tm);
+    string expires_param = expires_str;
+
+    cookie = "session_id=" + uid + "; expires=" + expires_param + "; path=/; HttpOnly";
+    return true;
+}
+
+bool HttpRequest::UserQuit(const string &uid)
+{
+    if (uid == "")
+    {
+        return false;
+    }
+    LOG_DEBUG("Verify uid:%s", uid.c_str());
+    redisContext *redis;
+    ConnRAII<redisContext> redisRAII(&redis, RedisConnPool::Instance());
+    assert(redis);
+
+    char order[256] = {0};
+    redisReply *reply = nullptr;
+
+    // 删除uid
+    snprintf(order, 256, "DEL %s", uid.c_str());
+    LOG_DEBUG("%s", order);
+    reply = (redisReply *)redisCommand(redis, order);
+    if (reply == nullptr || reply->type == REDIS_REPLY_ERROR)
+    {
+        // Handle error
+        if (reply != nullptr)
+            LOG_ERROR("Redis command error: %s", reply->str);
+        return false;
+    }
+    freeReplyObject(reply);
+    return true;
+}
+
+string HttpRequest::GenerateRandomID()
+{
+    // Seed for the random number generator
+    random_device rd;
+
+    // Use the Mersenne Twister engine with a random seed
+    mt19937 gen(rd());
+
+    // Define the characters allowed in the uid
+    const string characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+    // uid length
+    const int uid_length = 16;
+
+    // Generate the uid
+    uniform_int_distribution<> dis(0, characters.size() - 1);
+    string uid;
+    for (int i = 0; i < uid_length; ++i)
+    {
+        uid += characters[dis(gen)];
+    }
+
+    return uid;
 }
 
 HttpRequest::PARSE_STATE HttpRequest::State() const
@@ -731,6 +1060,11 @@ string HttpRequest::GetBody(const char *key) const
     return "";
 }
 
+HttpRequest::REQ_TYPE HttpRequest::reqType() const
+{
+    return reqType_;
+}
+
 string HttpRequest::reqRes() const
 {
     return reqRes_;
@@ -741,7 +1075,17 @@ string &HttpRequest::reqRes()
     return reqRes_;
 }
 
-int HttpRequest::reqType() const
+HttpRequest::AUTH_STATE HttpRequest::authState() const
 {
-    return reqType_;
+    return authState_;
+}
+
+string HttpRequest::authInfo() const
+{
+    return authInfo_;
+}
+
+string &HttpRequest::authInfo()
+{
+    return authInfo_;
 }
