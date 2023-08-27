@@ -15,14 +15,14 @@ using namespace std;
 int main(int argc, char *argv[])
 {
     // Mysql相关
-    const char *mysql_addr = "192.168.8.215"; // 数据库地址
+    const char *mysql_addr = "127.0.0.1"; // 数据库地址
     int mysql_port = 3306;                    // 数据库端口
     const char *mysql_user = "root";          // 数据库用户名
     const char *mysql_pwd = "root";           // 数据库密码
     const char *mysql_dbName = "webserver";   // 数据库名
 
     // Redis相关
-    const char *redis_addr = "192.168.8.215"; // 数据库地址
+    const char *redis_addr = "127.0.0.1"; // 数据库地址
     int redis_port = 6379;                    // 数据库端口
     const char *redis_user = NULL;            // 数据库用户名
     const char *redis_pwd = "root";           // 数据库密码

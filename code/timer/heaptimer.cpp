@@ -63,11 +63,10 @@ void HeapTimer::add(int id, int timeout, const TimeoutCallBack &cb)
 {
     assert(id >= 0);
     size_t i;
-    lock_guard<recursive_mutex> locker(mtx_);
 
     if (ref_.count(id) == 0)
     {
-        /* 新节点：堆尾插入，调整堆 */
+        // 新节点：堆尾插入，调整堆
         i = heap_.size();
         ref_[id] = i;
         heap_.push_back({id, Clock::now() + MS(timeout), cb});
@@ -75,7 +74,7 @@ void HeapTimer::add(int id, int timeout, const TimeoutCallBack &cb)
     }
     else
     {
-        /* 已有结点：调整堆 */
+        // 已有结点：调整堆
         i = ref_[id];
         adjust(id, timeout);
         heap_[i].cb = cb;
@@ -84,7 +83,6 @@ void HeapTimer::add(int id, int timeout, const TimeoutCallBack &cb)
 
 void HeapTimer::doWork(int id)
 {
-    lock_guard<recursive_mutex> locker(mtx_);
     /* 删除指定id结点，并触发回调函数 */
     if (heap_.empty() || ref_.count(id) == 0)
     {
@@ -98,9 +96,9 @@ void HeapTimer::doWork(int id)
 
 void HeapTimer::del_(size_t index)
 {
-    /* 删除指定位置的结点 */
+    // 删除指定位置的结点
     assert(!heap_.empty() && index >= 0 && index < heap_.size());
-    /* 将要删除的结点换到队尾，然后调整堆 */
+    // 将要删除的结点换到队尾，然后调整堆
     size_t i = index;
     size_t n = heap_.size() - 1;
     assert(i <= n);
@@ -112,15 +110,14 @@ void HeapTimer::del_(size_t index)
             siftup_(i);
         }
     }
-    /* 队尾元素删除 */
+    // 队尾元素删除
     ref_.erase(heap_.back().id);
     heap_.pop_back();
 }
 
 void HeapTimer::adjust(int id, int timeout)
 {
-    lock_guard<recursive_mutex> locker(mtx_);
-    /* 调整指定id的结点 */
+    // 调整指定id的结点
     assert(!heap_.empty() && ref_.count(id) > 0);
     heap_[ref_[id]].expires = Clock::now() + MS(timeout);
     if (!siftdown_(ref_[id], heap_.size()))
@@ -129,8 +126,7 @@ void HeapTimer::adjust(int id, int timeout)
 
 void HeapTimer::tick()
 {
-    lock_guard<recursive_mutex> locker(mtx_);
-    /* 清除超时结点 */
+    // 清除超时结点
     if (heap_.empty())
     {
         return;
@@ -169,7 +165,7 @@ int HeapTimer::GetNextTick()
 {
     tick();
     int res = -1;
-    lock_guard<recursive_mutex> locker(mtx_);
+
     if (!heap_.empty())
     {
         res = std::chrono::duration_cast<MS>(heap_.front().expires - Clock::now()).count();

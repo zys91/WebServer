@@ -518,6 +518,13 @@ a:hover, a:active, a:focus {
   gap: 2px; /* Adjust the gap between buttons */
 }
 
+.upload-prompt {
+  text-align: center;
+  margin-top: 20px; /* Adjust the margin as needed */
+  font-size: 18px; /* Adjust the font size as needed */
+  /* Add any other styling you want */
+}
+
 
 /*---------------------------------------
   Mobile Responsive styles              

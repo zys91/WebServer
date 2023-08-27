@@ -51,8 +51,6 @@ public:
     int GetNextTick();
 
 private:
-    std::recursive_mutex mtx_;
-
     void del_(size_t i);
 
     void siftup_(size_t i);

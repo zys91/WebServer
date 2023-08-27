@@ -33,21 +33,7 @@ WebServer::WebServer(
     HttpConn::dataDir = "./data";
     HttpConn::userCount = 0;
 
-    if (!MySQLConnPool::Instance()->InitPool(mysqlAddr, mysqlPort, mysqlUser, mysqlPwd, mysqlDBName, connPoolNum))
-    {
-        isClose_ = true;
-    }
-
-    if (!RedisConnPool::Instance()->InitPool(redisAddr, redisPort, redisUser, redisPwd, redisDBName, connPoolNum))
-    {
-        isClose_ = true;
-    }
-
     InitEventMode_(trigMode);
-    if (!InitSocket_())
-    {
-        isClose_ = true;
-    }
 
     if (enableLog)
     {
@@ -68,6 +54,24 @@ WebServer::WebServer(
             LOG_INFO("ConnPool num: %d, ThreadPool num: %d", connPoolNum, threadNum);
         }
     }
+
+    if (!MySQLConnPool::Instance()->InitPool(mysqlAddr, mysqlPort, mysqlUser, mysqlPwd, mysqlDBName, connPoolNum))
+    {
+        isClose_ = true;
+        LOG_ERROR("========== SQLPool Init error!==========");
+    }
+
+    if (!RedisConnPool::Instance()->InitPool(redisAddr, redisPort, redisUser, redisPwd, redisDBName, connPoolNum))
+    {
+        isClose_ = true;
+        LOG_ERROR("========== RedisPool Init error!==========");
+    }
+
+    if (!InitSocket_())
+    {
+        isClose_ = true;
+        LOG_ERROR("========== Socket Init error!==========");
+    }
 }
 
 WebServer::~WebServer()
@@ -78,6 +82,8 @@ WebServer::~WebServer()
     {
         close(listenFdv6_);
     }
+    close(pipefd[0]);
+    close(pipefd[1]);
     isClose_ = true;
     MySQLConnPool::Instance()->ClosePool();
     RedisConnPool::Instance()->ClosePool();
@@ -122,7 +128,7 @@ void WebServer::InitEventMode_(int trigMode)
 
 void WebServer::Start()
 {
-    int timeMS = -1; /* epoll wait timeout == -1 无事件将阻塞 */
+    int timeMS = -1; // epoll wait timeout == -1 无事件将阻塞
     if (!isClose_)
     {
         LOG_INFO("========== Server start ==========");
@@ -131,17 +137,27 @@ void WebServer::Start()
     {
         if (timeoutMS_ > 0)
         {
-            timeMS = timer_->GetNextTick();
+            timeMS = timer_->GetNextTick(); // 清除当前超时节点并获取最近的下一次超时时间
         }
         int eventCnt = epoller_->Wait(timeMS);
         for (int i = 0; i < eventCnt; i++)
         {
-            /* 处理事件 */
+            // 处理事件
             int fd = epoller_->GetEventFd(i);
             uint32_t events = epoller_->GetEvents(i);
             if (fd == listenFdv4_ || fd == listenFdv6_)
             {
                 DealListen_(fd);
+            }
+            else if (fd == pipefd[0] && (events & EPOLLIN))
+            {
+                int endfd = -1;
+                ssize_t bytesRead = read(pipefd[0], &endfd, sizeof(endfd));
+                if (bytesRead > 0 && endfd > 0)
+                {
+                    assert(users_.count(endfd) > 0);
+                    EndConn_(&users_[endfd]);
+                }
             } // EPOLLRDHUP: 对方异常断开连接 EPOLLHUP: 本方异常断开连接 EPOLLERR: 错误
             else if (events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR))
             {
@@ -183,8 +199,7 @@ void WebServer::CloseConn_(HttpConn *client)
     assert(client);
     LOG_INFO("Timeout -> Client[%d] quit!", client->GetFd());
     epoller_->DelFd(client->GetFd());
-    client->Close();
-    users_.erase(client->GetFd());
+    users_.erase(client->GetFd()); // 自动调用析构函数
 }
 
 // 主动关闭连接，并从timer中删除
@@ -258,10 +273,12 @@ void WebServer::OnRead_(HttpConn *client)
     assert(client);
     int ret = -1;
     int readErrno = 0;
+    int fd = client->GetFd();
     ret = client->read(&readErrno);
     if (ret <= 0 && readErrno != EAGAIN)
     {
-        EndConn_(client);
+        lock_guard<mutex> lock(pipeMutex);
+        write(pipefd[1], &fd, sizeof(fd));
         return;
     }
     OnProcess(client);
@@ -284,10 +301,11 @@ void WebServer::OnWrite_(HttpConn *client)
     assert(client);
     int ret = -1;
     int writeErrno = 0;
+    int fd = client->GetFd();
     ret = client->write(&writeErrno);
     if (client->ToWriteBytes() == 0)
     {
-        /* 传输完成 */
+        // 传输完成
         if (client->IsKeepAlive())
         {
             OnProcess(client);
@@ -298,12 +316,13 @@ void WebServer::OnWrite_(HttpConn *client)
     {
         if (writeErrno == EAGAIN)
         {
-            /* 继续传输 */
-            epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT);
+            // 继续传输
+            epoller_->ModFd(fd, connEvent_ | EPOLLOUT);
             return;
         }
     }
-    EndConn_(client);
+    lock_guard<mutex> lock(pipeMutex);
+    write(pipefd[1], &fd, sizeof(fd));
 }
 
 void sig_handler(int signum)
@@ -312,7 +331,6 @@ void sig_handler(int signum)
         WebServer::isClose_ = true;
 }
 
-/* Create listenFd */
 bool WebServer::InitSocket_()
 {
     int ret;
@@ -335,7 +353,7 @@ bool WebServer::InitSocket_()
     struct linger optLinger = {0};
     if (enableLinger_)
     {
-        /* 优雅关闭: 直到所剩数据发送完毕或超时 */
+        // 优雅关闭: 直到所剩数据发送完毕或超时
         optLinger.l_onoff = 1;
         optLinger.l_linger = 1;
     }
@@ -463,6 +481,23 @@ bool WebServer::InitSocket_()
         }
         SetFdNonblock(listenFdv6_);
     }
+    // 创建管道，用于信号处理，多线程写入管道pipefd[1]，主线程从管道pipefd[0]读取数据
+    ret = pipe(pipefd);
+    if (ret == -1)
+    {
+        LOG_ERROR("pipe error!");
+        return false;
+    }
+
+    ret = epoller_->AddFd(pipefd[0], EPOLLIN);
+    if (ret == 0)
+    {
+        LOG_ERROR("Add pipefd error!");
+        close(pipefd[0]);
+        return false;
+    }
+    SetFdNonblock(pipefd[0]); // 管道读
+    SetFdNonblock(pipefd[1]); // 管道写
 
     // 屏蔽管道信号 SIGPIPE: Broken pipe 防止程序向已关闭的socket写数据时，系统向进程发送SIGPIPE信号，导致进程退出
     signal(SIGPIPE, SIG_IGN);

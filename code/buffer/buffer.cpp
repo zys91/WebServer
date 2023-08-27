@@ -113,7 +113,7 @@ ssize_t Buffer::ReadFd(int fd, int *saveErrno)
     char buff[65535];
     struct iovec iov[2];
     const size_t writable = WritableBytes();
-    /* 分散读， 保证数据全部读完 */
+    // 分散读，保证数据全部读完
     iov[0].iov_base = BeginPtr_() + writePos_;
     iov[0].iov_len = writable;
     iov[1].iov_base = buff;

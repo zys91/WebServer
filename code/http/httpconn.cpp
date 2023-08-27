@@ -104,7 +104,7 @@ uint16_t HttpConn::GetPort() const
 ssize_t HttpConn::read(int *saveErrno)
 {
     ssize_t len = -1;
-    /*如果是LT模式，那么只读取一次，如果是ET模式，会一直读取，直到读不出数据*/
+    // 如果是LT模式，那么只读取一次，如果是ET模式，会一直读取，直到读不出数据
     do
     {
         len = readBuff_.ReadFd(fd_, saveErrno);
@@ -140,7 +140,7 @@ ssize_t HttpConn::write(int *saveErrno)
 
         if (ToWriteBytes() == 0)
         {
-            break; /* 传输结束 */
+            break; // 传输结束
         }
         else if (iovCnt_ > 1 && static_cast<size_t>(len) > iov_[0].iov_len) // MMAP
         {
@@ -181,33 +181,44 @@ bool HttpConn::process()
     }
 
     HttpRequest::HTTP_CODE processStatus = request_.parse(readBuff_);
-    if (processStatus == HttpRequest::GET_REQUEST)
+    int statusCode = 0;
+    bool isKeepAlive = request_.IsKeepAlive();
+
+    switch (processStatus)
     {
+    case HttpRequest::GET_REQUEST:
+        statusCode = 200;
         LOG_DEBUG("Client[%d] req:[%d]%s auth:[%d]%s", fd_, request_.reqType(), request_.reqRes().c_str(), request_.authState(), request_.authInfo().c_str());
-        response_.Init(request_.reqType(), request_.reqRes(), request_.authState(), request_.authInfo(), resDir, request_.IsKeepAlive(), 200);
-    }
-    else if (processStatus == HttpRequest::FORBIDDENT_REQUEST)
-    {
+        break;
+    case HttpRequest::FORBIDDENT_REQUEST:
+        statusCode = 403;
         LOG_DEBUG("Client[%d] req:forbidden auth:fail", fd_);
-        response_.Init(request_.reqType(), request_.reqRes(), request_.authState(), request_.authInfo(), resDir, request_.IsKeepAlive(), 403);
-    }
-    else if (processStatus == HttpRequest::NO_REQUEST)
-    {
+        break;
+    case HttpRequest::UNAUTH_REQUEST:
+        statusCode = 401;
+        LOG_DEBUG("Client[%d] req:unauth auth:need", fd_);
+        break;
+    case HttpRequest::INTERNAL_ERROR:
+        statusCode = 500;
+        LOG_DEBUG("Client[%d] req:internal error", fd_);
+        break;
+    case HttpRequest::NO_REQUEST:
         LOG_DEBUG("Client[%d] req:wait next...", fd_);
         return false;
-    }
-    else
-    {
-        response_.Init(request_.reqType(), request_.reqRes(), request_.authState(), request_.authInfo(), resDir, false, 400);
+    default: // BAD_REQUEST
+        statusCode = 400;
+        isKeepAlive = false;
+        break;
     }
 
+    response_.Init(request_.reqType(), request_.reqRes(), request_.authState(), request_.authInfo(), resDir, isKeepAlive, statusCode);
     response_.MakeResponse(writeBuff_);
-    /* 响应头 */
+    // 响应头
     iov_[0].iov_base = const_cast<char *>(writeBuff_.Peek());
     iov_[0].iov_len = writeBuff_.ReadableBytes();
     iovCnt_ = 1;
 
-    /* 文件 */
+    // 文件
     if (response_.FileTransMethod() == HttpResponse::MMAP)
     {
         if (response_.FileLen() > 0 && response_.FilePtr())

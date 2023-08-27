@@ -53,9 +53,11 @@ private:
     int port_;
     bool enableLinger_;
     bool enableIPv6_;
-    int timeoutMS_; /* 毫秒MS */
+    int timeoutMS_; // 毫秒MS
     int listenFdv4_;
     int listenFdv6_;
+    int pipefd[2]; // 文件描述符数组，0表示读取端，1表示写入端
+    std::mutex pipeMutex;
 
     uint32_t listenEvent_;
     uint32_t connEvent_;

@@ -25,26 +25,48 @@ public:
         FINISH,
     };
 
+    enum LINE_STATE
+    {
+        LINE_OK,
+        LINE_ERROR,
+        LINE_OPEN,
+    };
+
+    enum HTTP_METHOD
+    {
+        METHOD_UNKNOWN,
+        GET,
+        POST,
+        HEAD,
+        PUT,
+        DELETE,
+        CONNECT,
+        OPTIONS,
+        TRACE,
+        PATCH,
+    };
+
     enum HTTP_CODE
     {
-        NO_REQUEST = 0,
-        GET_REQUEST,
-        BAD_REQUEST,
-        FORBIDDENT_REQUEST,
-        INTERNAL_ERROR,
-        CLOSED_CONNECTION,
+        NO_REQUEST,
+        GET_REQUEST,        // 200
+        BAD_REQUEST,        // 400
+        UNAUTH_REQUEST,     // 401
+        FORBIDDENT_REQUEST, // 403
+        INTERNAL_ERROR,     // 500
     };
 
     enum REQ_TYPE
     {
-        GET_HTML = 0,
+        GET_HTML,
         GET_FILE,
         GET_INFO, // JSON
     };
 
     enum AUTH_STATE
     {
-        AUTH_NONE = 0,
+        AUTH_ANON,
+        AUTH_NEED,
         AUTH_SET,
         AUTH_PASS,
         AUTH_FAIL,
@@ -58,7 +80,7 @@ public:
     PARSE_STATE State() const;
 
     std::string path() const;
-    std::string method() const;
+    HTTP_METHOD method() const;
     std::string version() const;
     std::string GetBody(const std::string &key) const;
     std::string GetBody(const char *key) const;
@@ -72,13 +94,15 @@ public:
     bool IsKeepAlive() const;
 
 private:
+    LINE_STATE ParseLine_(Buffer &buff, std::string &line);
     bool ParseRequestLine_(const std::string &line);
     void ParseHeader_(const std::string &line);
     void ParsePath_();
+    void ParseMethod_(const std::string &methodStr);
     void ParseQuery_();
-    void ParseCookies_(const std::string &cookieString);
+    void ParseCookies_(const std::string &cookieStr);
     void CheckCookie_();
-    void ParseBody_(const std::string &line);
+    void ParseRequest_(const std::string &line);
     void ParseGet_();
     void ParsePost_();
     void ParseUrlencodedData_(std::string &data, std::unordered_map<std::string, std::string> &paramMap);
@@ -102,7 +126,8 @@ private:
 
     std::string resDir_, dataDir_;
     PARSE_STATE state_;
-    std::string method_, url_, path_, query_, version_, body_;
+    HTTP_METHOD method_;
+    std::string url_, path_, query_, version_, body_;
     std::unordered_map<std::string, std::string> header_, cookies_, queryRes_, bodyRes_;
 
     REQ_TYPE reqType_;
@@ -111,8 +136,50 @@ private:
     std::string authInfo_;
     std::string userInfo_; // 此处简化用户信息为username
 
+    static const std::unordered_map<std::string, HTTP_METHOD> HTTP_METHOD_MAP;
     static const std::unordered_set<std::string> DEFAULT_HTML;
     static const std::unordered_map<std::string, int> DEFAULT_HTML_TAG, SPECIAL_PATH_TAG;
 };
+
+/*HTTP Status Code
+1xx - Informational:
+100 Continue
+101 Switching Protocols
+102 Processing
+
+2xx - Success:
+200 OK
+201 Created
+202 Accepted
+204 No Content
+206 Partial Content
+
+3xx - Redirection:
+300 Multiple Choices
+301 Moved Permanently
+302 Found (Moved Temporarily)
+304 Not Modified
+307 Temporary Redirect
+308 Permanent Redirect
+
+4xx - Client Errors:
+400 Bad Request
+401 Unauthorized
+403 Forbidden
+404 Not Found
+405 Method Not Allowed
+406 Not Acceptable
+409 Conflict
+410 Gone
+429 Too Many Requests
+
+5xx - Server Errors:
+500 Internal Server Error
+501 Not Implemented
+502 Bad Gateway
+503 Service Unavailable
+504 Gateway Timeout
+505 HTTP Version Not Supported
+*/
 
 #endif // HTTP_REQUEST_H

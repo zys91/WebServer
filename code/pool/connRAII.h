@@ -11,7 +11,7 @@
 
 #include "connpool.h"
 
-/* 资源在对象构造初始化 资源在对象析构时释放*/
+// 资源在对象构造初始化 资源在对象析构时释放
 template <typename T>
 class ConnRAII {
 public:

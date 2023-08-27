@@ -10,7 +10,7 @@
 
      <meta charset="UTF-8">
 
-     <title>MARK-400</title>
+     <title>MARK-401</title>
      <link rel="icon" href="images/favicon.ico">
      <link rel="stylesheet" href="css/bootstrap.min.css">
      <link rel="stylesheet" href="css/animate.css">
@@ -63,9 +63,10 @@
                          <img src="images/profile-image.jpg" class="wow fadeInUp img-responsive img-circle"
                               data-wow-delay="0.2s" alt="about image">
                     </div>
-                    <div class="col-md-8 col-sm-8">
-                         <h1 class="wow fadeInUp" data-wow-delay="0.6s">400 无法解析请求</h1>                    
-                    </div>
+                    <h1 class="wow fadeInUp" data-wow-delay="0.6s">401 未授权</h1>
+                    <p class="wow fadeInUp" data-wow-delay="0.8s">
+                         请<a href="/user" id="redirectLink">前往用户页面</a>登录或注册
+                    </p>
                </div>
           </div>
      </section>
@@ -78,7 +79,18 @@
      <script src="js/magnific-popup-options.js"></script>
      <script src="js/wow.min.js"></script>
      <script src="js/custom.js"></script>
+     <script>
+          // Function to redirect after a specified delay
+          function redirectToUserPage() {
+               window.location.href = '/user';
+          }
 
+          // Delay in milliseconds
+          const delay = 5000; // 5 seconds
+
+          // Automatically redirect after the specified delay
+          setTimeout(redirectToUserPage, delay);
+     </script>
 </body>
 
 </html>

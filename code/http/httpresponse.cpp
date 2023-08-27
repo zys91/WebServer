@@ -38,14 +38,18 @@ const unordered_map<string, string> HttpResponse::SUFFIX_TYPE = {
 const unordered_map<int, string> HttpResponse::CODE_STATUS = {
     {200, "OK"},
     {400, "Bad Request"},
+    {401, "Unauthorized"},
     {403, "Forbidden"},
     {404, "Not Found"},
+    {500, "Internal Server Error"},
 };
 
 const unordered_map<int, string> HttpResponse::CODE_PATH = {
     {400, "/400.html"},
+    {401, "/401.html"},
     {403, "/403.html"},
     {404, "/404.html"},
+    {500, "/500.html"},
 };
 
 HttpResponse::HttpResponse()
@@ -54,7 +58,7 @@ HttpResponse::HttpResponse()
     isKeepAlive_ = false;
     reqType_ = HttpRequest::GET_HTML;
     reqRes_ = "";
-    authState_ = HttpRequest::AUTH_NONE;
+    authState_ = HttpRequest::AUTH_ANON;
     authInfo_ = "";
     transMethod_ = NONE;
     FileFd_ = -1;
@@ -92,7 +96,7 @@ void HttpResponse::MakeResponse(Buffer &buff)
         // 判断请求的资源类型
         if (reqType_ == HttpRequest::GET_HTML || reqType_ == HttpRequest::GET_FILE)
         {
-            /* 判断请求的资源文件 */
+            // 判断请求的资源文件
             if (reqRes_.empty() || stat((reqRes_).data(), &FileStat_) < 0 || S_ISDIR(FileStat_.st_mode))
             {
                 code_ = 404;
@@ -202,8 +206,7 @@ void HttpResponse::AddContent_(Buffer &buff)
             return;
         }
 
-        /* 将文件映射到内存提高文件的访问速度
-            MAP_PRIVATE 建立一个写入时拷贝的私有映射*/
+        // 将文件映射到内存提高文件的访问速度 MAP_PRIVATE 建立一个写入时拷贝的私有映射
         LOG_DEBUG("file path %s", (reqRes_).data());
         int *mmRet = (int *)mmap(0, FileStat_.st_size, PROT_READ, MAP_PRIVATE, srcFd, 0);
         if (*mmRet == -1)
@@ -256,7 +259,7 @@ void HttpResponse::CloseFile()
 
 string HttpResponse::GetFileType_()
 {
-    /* 判断文件类型 */
+    // 判断文件类型
     string::size_type idx = reqRes_.find_last_of('.');
     if (idx == string::npos)
     {

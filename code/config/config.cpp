@@ -12,17 +12,17 @@ using namespace std;
 
 Config::Config()
 {
-    sr_daemon = false;    // 前台运行
-    sr_port = 1316;       // 服务端口 默认1316
-    sr_trigMode = 3;      // ET+ET
-    sr_timeoutMS = 60000; // 超时60s
-    sr_optLinger = true;  // 优雅退出
-    sr_optIPv6 = true;    // 双栈支持
-    sr_connPoolNum = 12;  // 连接池数量
-    sr_threadNum = 8;     // 线程池数量
-    sr_enableLog = true;  // 日志开关
-    sr_logLevel = 1;      // 日志等级
-    sr_logQueSize = 1024; // 日志异步队列容量
+    sr_daemon = false;    // 前台运行 -d
+    sr_port = 1316;       // 服务端口 默认1316 -p 1316
+    sr_trigMode = 3;      // ET+ET -e 3
+    sr_timeoutMS = 60000; // 超时60s -t 60000
+    sr_optLinger = true;  // 优雅退出 -L
+    sr_optIPv6 = true;    // 双栈支持 -I
+    sr_connPoolNum = 12;  // 连接池数量 -C 12
+    sr_threadNum = 8;     // 线程池数量 -T 8
+    sr_enableLog = true;  // 日志开关 -l
+    sr_logLevel = 1;      // 日志等级 -D 1
+    sr_logQueSize = 1024; // 日志异步队列容量 -q 1024
 }
 
 void Config::parse_arg(int argc, char *argv[])

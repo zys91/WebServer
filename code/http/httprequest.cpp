@@ -18,6 +18,17 @@
 
 using namespace std;
 
+const unordered_map<string, HttpRequest::HTTP_METHOD> HttpRequest::HTTP_METHOD_MAP = {
+    {"GET", GET},
+    {"POST", POST},
+    {"HEAD", HEAD},
+    {"PUT", PUT},
+    {"DELETE", DELETE},
+    {"CONNECT", CONNECT},
+    {"OPTIONS", OPTIONS},
+    {"TRACE", TRACE},
+    {"PATCH", PATCH}};
+
 const unordered_set<string> HttpRequest::DEFAULT_HTML{
     "/index",
     "/picture",
@@ -45,22 +56,24 @@ const unordered_map<string, int> HttpRequest::SPECIAL_PATH_TAG{
 
 HttpRequest::HttpRequest()
 {
-    method_ = url_ = path_ = query_ = version_ = body_ = "";
+    url_ = path_ = query_ = version_ = body_ = "";
+    method_ = METHOD_UNKNOWN;
     state_ = REQUEST_LINE;
     reqType_ = GET_HTML;
     reqRes_ = "";
-    authState_ = AUTH_NONE;
+    authState_ = AUTH_ANON;
     authInfo_ = "";
     userInfo_ = "";
 }
 
 void HttpRequest::Init(const string &resDir, const string &dataDir)
 {
-    method_ = url_ = path_ = query_ = version_ = body_ = "";
+    url_ = path_ = query_ = version_ = body_ = "";
+    method_ = METHOD_UNKNOWN;
     state_ = REQUEST_LINE;
     reqType_ = GET_HTML;
     reqRes_ = "";
-    authState_ = AUTH_NONE;
+    authState_ = AUTH_ANON;
     authInfo_ = "";
     userInfo_ = "";
     resDir_ = resDir;
@@ -80,38 +93,82 @@ bool HttpRequest::IsKeepAlive() const
     return false;
 }
 
-HttpRequest::HTTP_CODE HttpRequest::parse(Buffer &buff)
+HttpRequest::LINE_STATE HttpRequest::ParseLine_(Buffer &buff, string &line)
 {
     const char CRLF[] = "\r\n";
-    if (buff.ReadableBytes() <= 0)
+    if (state_ == BODY) // BODY部分特殊处理
     {
-        return NO_REQUEST;
+        if (method_ == GET)
+        {
+            LOG_DEBUG("GET method, no body");
+            line = "";
+            buff.RetrieveAll();
+            return LINE_OK;
+        }
+        else if (method_ == POST)
+        {
+            size_t contentLen;
+            size_t maxAllowContentLength = 1024 * 1024 * 1024; // 1GB
+            LOG_DEBUG("POST method, has body");
+            if (header_.count("Content-Length") == 0)
+            {
+                LOG_ERROR("POST method, no Content-Length");
+                return LINE_ERROR;
+            }
+
+            try
+            {
+                contentLen = std::stoul(header_["Content-Length"]); // 获取body长度
+                if (contentLen > maxAllowContentLength)
+                {
+                    LOG_ERROR("POST method, Content-Length too long");
+                    return LINE_ERROR;
+                }
+            }
+            catch (const out_of_range &e)
+            {
+                // Handle the case where the string couldn't be converted to size_t
+                LOG_ERROR("POST method, Content-Length too long");
+                return LINE_ERROR;
+            }
+
+            // multipart/form-data处理方式：分段分批读取，节约内存占用
+            if (header_["Content-Type"] == "multipart/form-data")
+            {
+                // TODO: 分段分批读取
+            }
+
+            // 其他Content-Type默认处理方式：按contentLen一次性读取
+            if (buff.ReadableBytes() < contentLen)
+            {
+                return LINE_OPEN;
+            }
+            line = string(buff.Peek(), buff.Peek() + contentLen);
+            buff.RetrieveAll();
+            return LINE_OK;
+        }
+        // TODO: 支持其他Method
     }
 
-    while (buff.ReadableBytes() && state_ != FINISH)
+    // REQUEST_LINE和HEADERS部分按行处理
+    // lineEnd 为寻找到第一个/r/n所在的位置
+    const char *lineEnd = search(buff.Peek(), buff.BeginWriteConst(), CRLF, CRLF + 2);
+    // 未找到下一个CRLF
+    if (lineEnd == buff.BeginWriteConst())
     {
-        const char *lineEnd;
-        if (state_ == BODY) // TODO: 支持流式分批处理BODY数据，尤其是大文件上传业务
-        {
-            lineEnd = buff.BeginWriteConst();
-            /*判断post数据是否接受完整，未接收完则退出循环，表示继续请求*/
-            if (buff.ReadableBytes() < static_cast<unsigned long>(atol(header_["Content-Length"].c_str())))
-            {
-                break;
-            }
-        }
-        else
-        {
-            lineEnd = search(buff.Peek(), buff.BeginWriteConst(), CRLF, CRLF + 2);
-            /* 若解析状态停留在HEADERS且没有空行作为结尾，直接退出循环，等待接收剩余数据 */
-            if (lineEnd == buff.BeginWriteConst() && state_ == HEADERS)
-            {
-                break;
-            }
-        }
+        return LINE_OPEN;
+    }
+    line = string(buff.Peek(), lineEnd); // 提取一行，不含CRLF
+    buff.RetrieveUntil(lineEnd + 2);     // 将已经提取的数据从缓冲区中取出
+    return LINE_OK;
+}
 
-        string line(buff.Peek(), lineEnd); // 提取一行，不含CRLF
-
+HttpRequest::HTTP_CODE HttpRequest::parse(Buffer &buff)
+{
+    string line;
+    LINE_STATE lineState = LINE_OK;
+    while (((lineState = ParseLine_(buff, line)) == LINE_OK && state_ != FINISH))
+    {
         switch (state_)
         {
         case REQUEST_LINE:
@@ -122,45 +179,30 @@ HttpRequest::HTTP_CODE HttpRequest::parse(Buffer &buff)
             break;
         case HEADERS:
             ParseHeader_(line);
-            // GET请求且解析到空行，则解析完成，即使BODY还有数据也不再解析
-            if (state_ == BODY && method_ == "GET")
-            {
-                ParseGet_();
-                state_ = FINISH;
-                buff.RetrieveAll();
-                if (authState_ == AUTH_FAIL)
-                {
-                    return FORBIDDENT_REQUEST;
-                }
-                return GET_REQUEST;
-            } // POST请求且解析到空行，且Content-Length为0，则解析完成，即BODY无数据
-            else if (state_ == BODY && method_ == "POST" && header_["Content-Length"] == "0")
-            {
-                line = "";
-                ParseBody_(line);
-                buff.RetrieveAll();
-                if (authState_ == AUTH_FAIL)
-                {
-                    return FORBIDDENT_REQUEST;
-                }
-                return GET_REQUEST;
-            }
             break;
         case BODY:
-            ParseBody_(line);
-            buff.RetrieveAll();
+            ParseRequest_(line);
             if (authState_ == AUTH_FAIL)
             {
                 return FORBIDDENT_REQUEST;
+            }
+            else if (authState_ == AUTH_NEED)
+            {
+                return UNAUTH_REQUEST;
             }
             return GET_REQUEST;
             break;
         default:
             break;
         }
-        buff.RetrieveUntil(lineEnd + 2); // 跳过末尾CRLF
     }
-    LOG_DEBUG("[%s], [%s], [%s]", method_.c_str(), path_.c_str(), version_.c_str());
+
+    if (lineState == LINE_ERROR)
+    {
+        return BAD_REQUEST;
+    }
+
+    // 默认HttpRequest处理
     return NO_REQUEST;
 }
 
@@ -188,13 +230,27 @@ void HttpRequest::ParseQuery_()
     ParseUrlencodedData_(query_, queryRes_);
 }
 
+void HttpRequest::ParseMethod_(const string &methodStr)
+{
+    auto it = HTTP_METHOD_MAP.find(methodStr);
+    if (it != HTTP_METHOD_MAP.end())
+    {
+        method_ = it->second;
+    }
+    else
+    {
+        method_ = METHOD_UNKNOWN;
+    }
+}
+
 bool HttpRequest::ParseRequestLine_(const string &line)
 {
     regex patten("^([^ ]*) ([^ ]*) HTTP/([^ ]*)$");
     smatch subMatch;
     if (regex_match(line, subMatch, patten))
     {
-        method_ = subMatch[1];
+        string methodStr = subMatch[1];
+        ParseMethod_(methodStr);
         url_ = subMatch[2];
         version_ = subMatch[3];
         // Parse URL to extract path and query
@@ -212,6 +268,7 @@ bool HttpRequest::ParseRequestLine_(const string &line)
             query_ = "";
             ParsePath_();
         }
+        LOG_DEBUG("[%s], [%s], [%s], [%s]", methodStr.c_str(), path_.c_str(), query_.c_str(), version_.c_str());
         state_ = HEADERS;
         return true;
     }
@@ -237,12 +294,12 @@ void HttpRequest::ParseHeader_(const string &line)
     }
 }
 
-void HttpRequest::ParseCookies_(const string &cookieString)
+void HttpRequest::ParseCookies_(const string &cookieStr)
 {
     regex cookiePattern("([^;=]+)=([^;]*)");
     smatch cookieMatch;
 
-    auto cookieIter = sregex_iterator(cookieString.begin(), cookieString.end(), cookiePattern);
+    auto cookieIter = sregex_iterator(cookieStr.begin(), cookieStr.end(), cookiePattern);
     auto cookieEnd = sregex_iterator();
 
     for (; cookieIter != cookieEnd; ++cookieIter)
@@ -256,13 +313,37 @@ void HttpRequest::ParseCookies_(const string &cookieString)
         value.erase(value.find_last_not_of(" ") + 1);
         cookies_[key] = value;
     }
-    CheckCookie_();
 }
 
 void HttpRequest::CheckCookie_()
 {
-    if (cookies_.count("session_id") && UserVerify(cookies_["session_id"], userInfo_))
-        authState_ = AUTH_PASS;
+    if (cookies_.count("session_id"))
+    {
+        if (UserVerify(cookies_["session_id"], userInfo_))
+            authState_ = AUTH_PASS;
+        else
+            authState_ = AUTH_FAIL;
+    }
+    else
+    {
+        authState_ = AUTH_NEED;
+    }
+}
+
+void HttpRequest::ParseRequest_(const string &line)
+{
+    body_ = line;
+    // LOG_DEBUG("Body:%s, len:%d", line.c_str(), line.size());
+    if (method_ == GET)
+    {
+        ParseGet_();
+    }
+    else if (method_ == POST)
+    {
+        ParsePost_();
+    }
+    // TODO: 支持其他Method
+    state_ = FINISH;
 }
 
 void HttpRequest::ParseGet_()
@@ -273,9 +354,9 @@ void HttpRequest::ParseGet_()
         int tag = SPECIAL_PATH_TAG.find(path_)->second;
         LOG_DEBUG("Tag:%d", tag);
 
+        CheckCookie_();
         if (authState_ != AUTH_PASS)
         {
-            authState_ = AUTH_FAIL;
             return;
         }
 
@@ -321,45 +402,36 @@ void HttpRequest::ParseGet_()
         int tag = DEFAULT_HTML_TAG.find(path_)->second;
         LOG_DEBUG("Tag:%d", tag);
 
-        if (authState_ == AUTH_PASS)
+        CheckCookie_();
+        if (authState_ != AUTH_PASS)
         {
             if (tag == 1) // user.html
             {
-                path_ = "/welcome.html";
+                authState_ = AUTH_ANON; // user页面不存在鉴权失败的情况
                 reqType_ = GET_HTML;
                 reqRes_ = resDir_ + path_;
-                return;
             }
+            return;
         }
-        else
+
+        if (tag == 1) // user.html
         {
-            if (tag == 0) // file.html
-            {
-                path_ = "/user.html";
-                reqType_ = GET_HTML;
-                reqRes_ = resDir_ + path_;
-                return;
-            }
+            path_ = "/welcome.html";
+            reqType_ = GET_HTML;
+            reqRes_ = resDir_ + path_;
+            return;
         }
     }
 
-    // 默认GET请求
+    // 默认GET请求处理
     reqType_ = GET_HTML;
     reqRes_ = resDir_ + path_;
-}
-
-void HttpRequest::ParseBody_(const string &line)
-{
-    body_ = line;
-    ParsePost_();
-    state_ = FINISH;
-    // LOG_DEBUG("Body:%s, len:%d", line.c_str(), line.size());
 }
 
 void HttpRequest::ParsePost_()
 {
     // application/x-www-form-urlencoded
-    if (method_ == "POST" && header_["Content-Type"] == "application/x-www-form-urlencoded")
+    if (header_["Content-Type"] == "application/x-www-form-urlencoded")
     {
         ParseUrlencodedData_(body_, bodyRes_);
         if (SPECIAL_PATH_TAG.count(path_))
@@ -389,7 +461,7 @@ void HttpRequest::ParsePost_()
             return;
         }
     } // multipart/form-data
-    else if (method_ == "POST" && header_["Content-Type"].find("multipart/form-data") != string::npos)
+    else if (header_["Content-Type"].find("multipart/form-data") != string::npos)
     {
         string boundary = GetBoundaryFromContentType_(header_["Content-Type"]);
         if (!boundary.empty())
@@ -398,7 +470,7 @@ void HttpRequest::ParsePost_()
             return;
         }
     } // application/json
-    else if (method_ == "POST" && header_["Content-Type"] == "application/json")
+    else if (header_["Content-Type"] == "application/json")
     {
         nlohmann::json jsonRes;
         ParseJsonData_(body_, jsonRes);
@@ -407,9 +479,9 @@ void HttpRequest::ParsePost_()
             int tag = SPECIAL_PATH_TAG.find(path_)->second;
             LOG_DEBUG("Tag:%d", tag);
 
+            CheckCookie_();
             if (authState_ != AUTH_PASS)
             {
-                authState_ = AUTH_FAIL;
                 return;
             }
 
@@ -429,6 +501,10 @@ void HttpRequest::ParsePost_()
             }
         }
     }
+
+    // 默认POST请求处理
+    reqType_ = GET_HTML;
+    reqRes_ = resDir_ + path_;
 }
 
 void HttpRequest::ParseUrlencodedData_(string &data, unordered_map<string, string> &paramMap)
@@ -524,9 +600,9 @@ void HttpRequest::ParseMultipartFormData_(const string &data, const string &boun
                                 int tag = SPECIAL_PATH_TAG.find(path_)->second;
                                 LOG_DEBUG("Tag:%d", tag);
 
+                                CheckCookie_();
                                 if (authState_ != AUTH_PASS)
                                 {
-                                    authState_ = AUTH_FAIL;
                                     return;
                                 }
 
@@ -772,7 +848,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     char order[256] = {0};
     MYSQL_RES *res = nullptr;
 
-    /* 查询用户及密码 */
+    // 查询用户及密码
     snprintf(order, 256, "SELECT username, password FROM user WHERE username='%s' LIMIT 1", name.c_str());
     LOG_DEBUG("%s", order);
 
@@ -787,7 +863,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     {
         LOG_DEBUG("MYSQL ROW: %s %s", row[0], row[1]);
         string password(row[1]);
-        /* 登录行为 */
+        // 登录行为
         if (isLogin)
         {
             if (pwd == password)
@@ -809,7 +885,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     }
     mysql_free_result(res);
 
-    /* 注册行为 且 用户名未被使用*/
+    // 注册行为 且 用户名未被使用
     if (!isLogin && !used)
     {
         LOG_DEBUG("regirster!");
@@ -1030,7 +1106,7 @@ string HttpRequest::path() const
     return path_;
 }
 
-string HttpRequest::method() const
+HttpRequest::HTTP_METHOD HttpRequest::method() const
 {
     return method_;
 }
