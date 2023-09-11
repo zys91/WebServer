@@ -152,6 +152,7 @@ void WebServer::Start()
             else if (fd == pipefd[0] && (events & EPOLLIN))
             {
                 int endfd = -1;
+                lock_guard<mutex> lock(pipeMutex);
                 ssize_t bytesRead = read(pipefd[0], &endfd, sizeof(endfd));
                 if (bytesRead > 0 && endfd > 0)
                 {
