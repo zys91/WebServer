@@ -67,6 +67,9 @@ WebServer::WebServer(
         LOG_ERROR("========== RedisPool Init error!==========");
     }
 
+    listenFdv4_=-1;
+    listenFdv6_=-1;
+
     if (!InitSocket_())
     {
         isClose_ = true;
